@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/repairdb?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=true&enabledTLSProtocols=TLSv1.3
+    username: repairuser
+    password: '041206'  # 单引号强制包裹
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # 连接池配置（适配MySQL 9.x的超时机制）
+      connection-timeout: 30000  # 30秒超时
+      max-lifetime: 1800000      # 30分钟连接生命周期（MySQL 9.x默认超时更严格）
+      minimum-idle: 5
+      maximum-pool-size: 10
+      validation-timeout: 5000   # 验证连接有效性超时
+  jpa:
+    hibernate:
+      ddl-auto: update  # 自动更新表结构（首次启动后可改为validate）
+    properties:
+      hibernate:
+        # 显式指定MySQL 9.x方言（避免自动检测失败）
+        dialect: org.hibernate.dialect.MySQLDialect
+        # 禁用MySQL 9.x默认的缓存机制冲突
+        cache:
+          use_second_level_cache: false
+          use_query_cache: false
+    show-sql: true  # 开发环境显示SQL，生产环境关闭
