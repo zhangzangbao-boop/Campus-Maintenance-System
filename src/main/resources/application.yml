@@ -2,7 +2,8 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/repairdb?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=true&enabledTLSProtocols=TLSv1.3
     username: repairuser
-    password: '041206'  # 单引号强制包裹
+    password: '041206'  # 单引号强制包裹git remote set-url origin https://github.com/xiaojunzhe32-ai/-reportingcenter.git
+
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       # 连接池配置（适配MySQL 9.x的超时机制）
