@@ -1,5 +1,6 @@
 com\ligong\reportingcenter\dto\CategoryDto.class
 com\ligong\reportingcenter\domain\enums\TicketStatus.class
+com\ligong\reportingcenter\dto\RepairmanRatingStatsDto.class
 com\ligong\reportingcenter\dto\request\UserRegisterRequest.class
 com\ligong\reportingcenter\controller\CategoryController.class
 com\ligong\reportingcenter\exception\BusinessException.class
@@ -12,6 +13,7 @@ com\ligong\reportingcenter\dto\PagedResult.class
 com\ligong\reportingcenter\controller\AuthController.class
 com\ligong\reportingcenter\service\TicketService$1.class
 com\ligong\reportingcenter\dto\request\TicketImageRequest.class
+com\ligong\reportingcenter\dto\request\ResetPasswordRequest.class
 com\ligong\reportingcenter\dto\RatingDto.class
 com\ligong\reportingcenter\dto\request\TicketAssignRequest.class
 com\ligong\reportingcenter\controller\FileUploadController$ImageUploadResponse.class
@@ -21,18 +23,22 @@ com\ligong\reportingcenter\domain\entity\RepairTicket.class
 com\ligong\reportingcenter\dto\TicketStatusLogDto.class
 com\ligong\reportingcenter\domain\entity\User.class
 com\ligong\reportingcenter\dto\response\AuthResponse.class
+com\ligong\reportingcenter\repository\TicketRepository.class
 com\ligong\reportingcenter\config\AppConfig.class
 com\ligong\reportingcenter\service\CategoryService.class
 com\ligong\reportingcenter\domain\entity\Rating.class
 com\ligong\reportingcenter\dto\TicketSummaryDto.class
 com\ligong\reportingcenter\exception\GlobalExceptionHandler.class
+com\ligong\reportingcenter\dto\request\UserUpdateRequest.class
 com\ligong\reportingcenter\controller\UserController.class
+com\ligong\reportingcenter\dto\LocationStatsDto.class
 com\ligong\reportingcenter\RepairingCenterApplication.class
 com\ligong\reportingcenter\dto\TicketDetailDto.class
 com\ligong\reportingcenter\controller\TicketController$UpdateNotesRequest.class
 com\ligong\reportingcenter\service\RatingService.class
 com\ligong\reportingcenter\dto\request\LoginRequest.class
 com\ligong\reportingcenter\domain\entity\TicketStatusLog.class
+com\ligong\reportingcenter\dto\ResetPasswordResult.class
 com\ligong\reportingcenter\domain\entity\Category.class
 com\ligong\reportingcenter\service\UserService.class
 com\ligong\reportingcenter\controller\AdminController.class
@@ -42,7 +48,6 @@ com\ligong\reportingcenter\dto\UserDto.class
 com\ligong\reportingcenter\controller\TicketController$SetEstimatedTimeRequest.class
 com\ligong\reportingcenter\dto\TicketImageDto.class
 com\ligong\reportingcenter\domain\enums\UserRole.class
-com\ligong\reportingcenter\repository\RepairTicketRepository.class
 com\ligong\reportingcenter\dto\request\CategoryRequest.class
 com\ligong\reportingcenter\repository\RatingRepository.class
 com\ligong\reportingcenter\domain\entity\TicketImage.class

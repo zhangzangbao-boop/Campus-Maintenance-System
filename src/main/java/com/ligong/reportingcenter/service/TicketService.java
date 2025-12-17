@@ -8,11 +8,7 @@ import com.ligong.reportingcenter.domain.entity.TicketStatusLog;
 import com.ligong.reportingcenter.domain.entity.User;
 import com.ligong.reportingcenter.domain.enums.TicketStatus;
 import com.ligong.reportingcenter.domain.enums.UserRole;
-import com.ligong.reportingcenter.dto.RatingDto;
-import com.ligong.reportingcenter.dto.TicketDetailDto;
-import com.ligong.reportingcenter.dto.TicketImageDto;
-import com.ligong.reportingcenter.dto.TicketStatusLogDto;
-import com.ligong.reportingcenter.dto.TicketSummaryDto;
+import com.ligong.reportingcenter.dto.*;
 import com.ligong.reportingcenter.dto.request.TicketAssignRequest;
 import com.ligong.reportingcenter.dto.request.TicketCreateRequest;
 import com.ligong.reportingcenter.dto.request.TicketImageRequest;
@@ -20,13 +16,13 @@ import com.ligong.reportingcenter.dto.request.TicketRatingRequest;
 import com.ligong.reportingcenter.dto.request.TicketStatusUpdateRequest;
 import com.ligong.reportingcenter.exception.BusinessException;
 import com.ligong.reportingcenter.repository.RatingRepository;
-import com.ligong.reportingcenter.repository.RepairTicketRepository;
 import com.ligong.reportingcenter.repository.TicketImageRepository;
+import com.ligong.reportingcenter.repository.TicketRepository;
 import com.ligong.reportingcenter.repository.TicketStatusLogRepository;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Objects;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -37,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class TicketService {
 
-    private final RepairTicketRepository ticketRepository;
+    private final TicketRepository ticketRepository;
     private final TicketImageRepository imageRepository;
     private final TicketStatusLogRepository statusLogRepository;
     private final RatingRepository ratingRepository;
@@ -291,6 +287,68 @@ public class TicketService {
     @Transactional(readOnly = true)
     public Long countByStatus(TicketStatus status) {
         return ticketRepository.countByStatus(status);
+    }
+
+    // 新增方法：获取位置报修数量排行
+    @Transactional(readOnly = true)
+    public List<LocationStatsDto> getLocationStats() {
+        List<Object[]> results = ticketRepository.findLocationStats();
+        return results.stream()
+            .map(row -> new LocationStatsDto(
+                (String) row[0],
+                ((Long) row[1]).intValue()
+            ))
+            // 限制返回前10条记录
+            .limit(10)
+            .collect(Collectors.toList());
+    }
+
+    // 新增方法：获取维修人员评分排行
+    @Transactional(readOnly = true)
+    public List<RepairmanRatingStatsDto> getRepairmanRatingStats() {
+        List<Object[]> results = ticketRepository.findRepairmanRatingStats();
+        return results.stream()
+            .map(row -> new RepairmanRatingStatsDto(
+                (String) row[0],
+                (String) row[1],
+                ((Double) row[2]).intValue(),  // 平均分
+                ((Long) row[3]).intValue()      // 报修单数
+            ))
+            // 限制返回前10条记录
+            .limit(10)
+            .collect(Collectors.toList());
+    }
+
+    // 新增方法：获取月度统计数据
+    @Transactional(readOnly = true)
+    public Map<String, Object> getMonthlyStats() {
+        // 获取最近12个月的统计数据
+        LocalDate now = LocalDate.now();
+        Map<String, Object> monthlyStats = new HashMap<>();
+        
+        // 初始化月度数据
+        List<Map<String, Object>> monthsData = new ArrayList<>();
+        
+        for (int i = 11; i >= 0; i--) {
+            LocalDate month = now.minusMonths(i);
+            String monthStr = month.format(DateTimeFormatter.ofPattern("yyyy-MM"));
+            
+            Map<String, Object> monthData = new HashMap<>();
+            monthData.put("month", monthStr);
+            monthData.put("count", ticketRepository.countByMonth(monthStr));
+            monthsData.add(monthData);
+        }
+        
+        monthlyStats.put("months", monthsData);
+        
+        // 统计各类状态的数量
+        Map<String, Long> statusStats = new HashMap<>();
+        for (TicketStatus status : TicketStatus.values()) {
+            statusStats.put(status.name(), ticketRepository.countByStatus(status));
+        }
+        monthlyStats.put("statusDistribution", statusStats);
+        
+        return monthlyStats;
     }
 
     private RepairTicket findTicket(Long ticketId) {

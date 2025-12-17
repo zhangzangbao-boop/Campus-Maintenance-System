@@ -15,30 +15,33 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "sys_user") // 修改为与数据库一致
+@Table(name = "sys_user")
 public class User {
 
     @Id
-    @Column(name = "user_number") // 修改为主键列名与数据库一致
+    @Column(name = "user_number")
     private String userId;
 
-    @Column(name = "name", nullable = false, length = 100) // 修改列名与长度
+    @Column(name = "name", nullable = false, length = 100)
     private String nickname;
 
-    @Column(name = "password", nullable = false, length = 255) // 修改列名与长度
+    @Column(name = "password", nullable = false, length = 255)
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 20) // 修改列名与长度
+    @Column(name = "role", nullable = false, length = 20)
     private UserRole role;
 
-    @Column(name = "enabled") // 修改列名
+    @Column(name = "enabled")
     private Boolean isActive = true;
 
-    @Column(name = "phone", length = 20) // 修改列名与长度
+    @Column(name = "phone", length = 20)
     private String contactPhone;
 
-    @Column(name = "created_at", nullable = false) // 修改列名
+    @Column(name = "avatar_url", length = 500)
+    private String avatarUrl;
+
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     @PrePersist

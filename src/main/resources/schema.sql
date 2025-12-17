@@ -89,9 +89,21 @@ INSERT INTO `repair_category` (`category_key`) VALUES
 ('电器故障'),
 ('公共设施');
 
+-- 插入初始数据
+INSERT INTO `repair_category` (`category_key`) VALUES 
+('水电维修'),
+('网络故障'),
+('家具维修'),
+('电器故障'),
+('公共设施');
+
+-- 插入初始用户数据，密码为041206的BCRYPT哈希值
 INSERT INTO `sys_user` (`user_number`, `name`, `password`, `role`, `enabled`, `phone`, `created_at`) VALUES
 ('admin', '管理员', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'ADMIN', TRUE, '13800000000', NOW()),
 ('worker001', '维修员张三', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STAFF', TRUE, '13800000001', NOW()),
 ('worker002', '维修员李四', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STAFF', TRUE, '13800000002', NOW()),
 ('20210001', '学生王五', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STUDENT', TRUE, '13800000003', NOW()),
 ('20210002', '学生赵六', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STUDENT', TRUE, '13800000004', NOW());
+
+-- 如果需要重置所有测试用户的密码为041206，可以取消下面语句的注释
+-- UPDATE `sys_user` SET `password` = '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG';
