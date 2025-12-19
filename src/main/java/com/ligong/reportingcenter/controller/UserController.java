@@ -47,16 +47,60 @@ public class UserController {
     }
 
     @GetMapping
-    public List<UserDto> listUsers(@RequestParam(value = "role", required = false) String role) {
-        if (role == null || role.isBlank()) {
-            return userService.listAll();
+    public List<UserDto> listUsers(
+            @RequestParam(value = "role", required = false) String role,
+            @RequestParam(value = "name", required = false) String name,
+            @RequestParam(value = "userId", required = false) String userId,
+            @RequestParam(value = "keyword", required = false) String keyword) {
+        
+        List<UserDto> users;
+        
+        // 根据角色筛选
+        if (role != null && !role.isBlank()) {
+            try {
+                UserRole userRole = UserRole.valueOf(role.toUpperCase());
+                users = userService.listByRole(userRole);
+            } catch (IllegalArgumentException ex) {
+                throw new BusinessException("无效的角色类型");
+            }
+        } else {
+            users = userService.listAll();
         }
-        try {
-            UserRole userRole = UserRole.valueOf(role.toUpperCase());
-            return userService.listByRole(userRole);
-        } catch (IllegalArgumentException ex) {
-            throw new BusinessException("无效的角色类型");
+        
+        // 关键词搜索（支持 nickname、userId、contactPhone 字段）
+        if (keyword != null && !keyword.isBlank()) {
+            String lowerKeyword = keyword.toLowerCase();
+            users = users.stream()
+                .filter(user -> {
+                    String userNickname = user.nickname() != null ? user.nickname().toLowerCase() : "";
+                    String userUserId = user.userId() != null ? user.userId().toLowerCase() : "";
+                    String userPhone = user.contactPhone() != null ? user.contactPhone().toLowerCase() : "";
+                    return userNickname.contains(lowerKeyword)
+                        || userUserId.contains(lowerKeyword)
+                        || userPhone.contains(lowerKeyword);
+                })
+                .collect(java.util.stream.Collectors.toList());
         }
+        
+        // 单独字段搜索（优先级高于 keyword）
+        if (name != null && !name.isBlank()) {
+            String lowerName = name.toLowerCase();
+            users = users.stream()
+                .filter(user -> {
+                    String userNickname = user.nickname() != null ? user.nickname().toLowerCase() : "";
+                    return userNickname.contains(lowerName);
+                })
+                .collect(java.util.stream.Collectors.toList());
+        }
+        
+        if (userId != null && !userId.isBlank()) {
+            String lowerUserId = userId.toLowerCase();
+            users = users.stream()
+                .filter(user -> user.userId() != null && user.userId().toLowerCase().contains(lowerUserId))
+                .collect(java.util.stream.Collectors.toList());
+        }
+        
+        return users;
     }
 
     @PatchMapping("/{userId}/deactivate")

@@ -10,7 +10,13 @@ public record TicketSummaryDto(
     String studentId,
     String staffId,
     String locationText,
+    String description,
     String priority,
-    LocalDateTime createdAt
+    LocalDateTime createdAt,
+    LocalDateTime assignedAt,
+    LocalDateTime estimatedCompletionTime,
+    Integer ratingScore,
+    Boolean deleted,
+    LocalDateTime deletedAt
 ) {
 }

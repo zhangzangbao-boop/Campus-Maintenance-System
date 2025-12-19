@@ -9,7 +9,6 @@ import com.ligong.reportingcenter.service.UserService;
 import com.ligong.reportingcenter.service.TicketService;
 import com.ligong.reportingcenter.service.RatingService;
 import com.ligong.reportingcenter.service.CategoryService;
-import com.ligong.reportingcenter.domain.entity.Category;
 import com.ligong.reportingcenter.domain.enums.TicketStatus;
 import com.ligong.reportingcenter.exception.BusinessException;
 import java.util.List;
@@ -67,14 +66,14 @@ public class AdminController {
 
     @PutMapping("/users/{userId}")
     @PreAuthorize("hasRole('ADMIN')")
-    public UserDto updateUser(@PathVariable String userId, @RequestBody UserRegisterRequest request) {
+    public UserDto updateUser(@PathVariable("userId") String userId, @RequestBody UserRegisterRequest request) {
         return userService.updateUser(userId, request);
     }
 
     @DeleteMapping("/users/{userId}")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteUser(@PathVariable String userId) {
+    public void deleteUser(@PathVariable("userId") String userId) {
         userService.deactivate(userId);
     }
 
@@ -105,36 +104,97 @@ public class AdminController {
     // 数据统计
     @GetMapping("/stats/category")
     @PreAuthorize("hasRole('ADMIN')")
-    public Object getCategoryStats() {
-        List<Category> categories = categoryService.listAllCategories();
-        Map<String, Long> categoryStats = new HashMap<>();
-        for (Category category : categories) {
-            categoryStats.put(category.getCategoryName(), 
-                ticketService.countByCategory(category.getCategoryId()));
-        }
-        return categoryStats;
+    public Map<String, Object> getCategoryStats() {
+        // 基于数据库视图 vw_category_stats 的统计结果
+        List<Map<String, Object>> categoryStats = ticketService.getCategoryStatsFromView();
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", categoryStats);
+        return result;
     }
 
     @GetMapping("/stats/status")
     @PreAuthorize("hasRole('ADMIN')")
-    public Object getStatusStats() {
-        Map<String, Long> statusStats = new HashMap<>();
+    public Map<String, Object> getStatusStats() {
+        List<Map<String, Object>> statusStats = new java.util.ArrayList<>();
         for (TicketStatus status : TicketStatus.values()) {
-            statusStats.put(status.name(), ticketService.countByStatus(status));
+            Map<String, Object> item = new HashMap<>();
+            item.put("status", status.name());
+            item.put("count", ticketService.countByStatus(status));
+            item.put("value", ticketService.countByStatus(status));
+            statusStats.add(item);
         }
-        return statusStats;
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", statusStats);
+        return result;
+    }
+
+    @GetMapping("/stats/location")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> getLocationStats() {
+        List<com.ligong.reportingcenter.dto.LocationStatsDto> locationStats = ticketService.getLocationStats();
+        List<Map<String, Object>> locationData = locationStats.stream()
+            .map(dto -> {
+                Map<String, Object> item = new HashMap<>();
+                item.put("location", dto.location());
+                item.put("name", dto.location());
+                item.put("count", dto.count());
+                item.put("value", dto.count());
+                return item;
+            })
+            .collect(java.util.stream.Collectors.toList());
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", locationData);
+        return result;
     }
 
     @GetMapping("/stats/monthly")
     @PreAuthorize("hasRole('ADMIN')")
-    public Object getMonthlyStats() {
-        return ticketService.getMonthlyStats();
+    public Map<String, Object> getMonthlyStats() {
+        Map<String, Object> monthlyStats = ticketService.getMonthlyStats();
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", monthlyStats);
+        return result;
+    }
+
+    @GetMapping("/stats/repairman-rating")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> getRepairmanRatingStats() {
+        List<com.ligong.reportingcenter.dto.RepairmanRatingStatsDto> ratingStats = ticketService.getRepairmanRatingStats();
+        List<Map<String, Object>> ratingData = ratingStats.stream()
+            .map(dto -> {
+                Map<String, Object> item = new HashMap<>();
+                item.put("id", dto.id());
+                item.put("name", dto.name());
+                item.put("rating", dto.rating());
+                item.put("completedOrders", dto.completedOrders());
+                item.put("count", dto.completedOrders());
+                return item;
+            })
+            .collect(java.util.stream.Collectors.toList());
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", ratingData);
+        return result;
     }
 
     // 新增方法：重置用户密码
     @PostMapping("/users/{userId}/reset-password")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Object>> resetPassword(@PathVariable String userId) {
+    public ResponseEntity<Map<String, Object>> resetPassword(@PathVariable("userId") String userId) {
         try {
             ResetPasswordResult result = userService.resetPassword(userId);
             Map<String, Object> response = new HashMap<>();

@@ -1,5 +1,5 @@
 server:
-  port: 8081  # 更改端口避免冲突
+  port: 8080  # 更改端口避免冲突
 
 spring:
   datasource:
@@ -26,4 +26,14 @@ spring:
         cache:
           use_second_level_cache: false
           use_query_cache: false
+        # 事务隔离级别：READ_COMMITTED（读已提交，防止脏读）
+        connection:
+          isolation: 2  # 2 = READ_COMMITTED
     show-sql: true  # 开发环境显示SQL，生产环境关闭
+  transaction:
+    default-timeout: 30  # 默认事务超时时间（秒）
+
+# 数据备份配置
+backup:
+  directory: ./backups  # 备份文件存储目录
+  retention-days: 30    # 备份文件保留天数，超过此天数的备份将被自动删除

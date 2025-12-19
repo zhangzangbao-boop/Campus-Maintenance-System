@@ -11,17 +11,21 @@ import com.ligong.reportingcenter.dto.response.AuthResponse;
 import com.ligong.reportingcenter.exception.BusinessException;
 import com.ligong.reportingcenter.repository.UserRepository;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class UserService {
+public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -43,7 +47,16 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByUserIdAndIsActiveTrue(request.userId())
+        // 支持使用 userId 或 nickname 登录
+        // 先尝试通过 userId 查找
+        Optional<User> userOpt = userRepository.findActiveByUserId(request.userId());
+        
+        // 如果通过 userId 找不到，尝试通过 nickname 查找
+        if (userOpt.isEmpty()) {
+            userOpt = userRepository.findActiveByNickname(request.userId());
+        }
+        
+        User user = userOpt
             .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "账号不存在或已禁用"));
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "密码错误");
@@ -116,22 +129,42 @@ public class UserService {
         );
     }
 
-    public User loadActiveUser(String userId) {
-        return userRepository.findByUserIdAndIsActiveTrue(userId)
-            .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "用户不存在或已禁用"));
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = userRepository.findByUserId(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+        
+        return org.springframework.security.core.userdetails.User.builder()
+                .username(user.getUserId())
+                .password(user.getPasswordHash())
+                .authorities("ROLE_" + user.getRole().name())
+                .accountExpired(false)
+                .accountLocked(false)
+                .credentialsExpired(false)
+                .disabled(!user.getIsActive())
+                .build();
     }
 
+    public User loadActiveUser(String userId) {
+        User user = userRepository.findByUserId(userId)
+                .orElseThrow(() -> new BusinessException("用户不存在"));
+        if (!user.getIsActive()) {
+            throw new BusinessException("用户账户已被禁用");
+        }
+        return user;
+    }
+    
+    // 添加缺失的方法
+    @Transactional(readOnly = true)
+    public UserDto getCurrentUser(String userId) {
+        return findById(userId);
+    }
+    
     @Transactional
     public UserDto updateUserInfo(String userId, UserUpdateRequest request) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "用户不存在"));
-        
-        // 验证用户角色权限
-        if (user.getRole() != UserRole.STUDENT && user.getRole() != UserRole.STAFF) {
-            throw new BusinessException("仅学生和维修工可以更新个人信息");
-        }
-        
-        // 更新用户信息
+            
         if (request.getNickname() != null && !request.getNickname().isBlank()) {
             user.setNickname(request.getNickname());
         }
@@ -140,7 +173,6 @@ public class UserService {
             user.setContactPhone(request.getContactPhone());
         }
         
-        // 头像上传处理（如果需要）
         if (request.getAvatarUrl() != null && !request.getAvatarUrl().isBlank()) {
             user.setAvatarUrl(request.getAvatarUrl());
         }
@@ -148,77 +180,17 @@ public class UserService {
         userRepository.save(user);
         return toDto(user);
     }
-
-    // 新增方法：获取当前用户信息
-    @Transactional(readOnly = true)
-    public UserDto getCurrentUser(String userId) {
-        User user = userRepository.findById(userId)
-            .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "用户不存在"));
-        return toDto(user);
-    }
-
+    
     @Transactional
     public ResetPasswordResult resetPassword(String userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "用户不存在"));
-        
+            
         // 生成随机密码
-        String newPassword = generateRandomPassword();
-        
-        // 验证密码复杂度
-        validatePasswordComplexity(newPassword);
-        
-        // 加密并保存新密码
+        String newPassword = RandomStringUtils.randomAlphanumeric(8);
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         
-        // 发送密码重置通知（可选）
-        sendPasswordResetNotification(user.getUserId(), newPassword);
-        
-        return new ResetPasswordResult(user.getUserId(), newPassword);
-    }
-
-    private void validatePasswordComplexity(String password) {
-        if (password.length() < 8) {
-            throw new BusinessException("密码长度不能少于8位");
-        }
-        
-        boolean hasLetter = false;
-        boolean hasDigit = false;
-        
-        for (char c : password.toCharArray()) {
-            if (Character.isLetter(c)) {
-                hasLetter = true;
-            }
-            if (Character.isDigit(c)) {
-                hasDigit = true;
-            }
-        }
-        
-        if (!hasLetter || !hasDigit) {
-            throw new BusinessException("密码必须包含字母和数字");
-        }
-    }
-
-    private String generateRandomPassword() {
-        // 生成8位随机密码，确保包含字母和数字
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuilder password = new StringBuilder();
-        
-        // 确保至少有一个字母和一个数字
-        password.append(RandomStringUtils.random(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"));
-        password.append(RandomStringUtils.random(1, "0123456789"));
-        
-        // 剩余6位随机生成
-        password.append(RandomStringUtils.random(6, chars));
-        
-        return password.toString();
-    }
-
-    private void sendPasswordResetNotification(String userId, String newPassword) {
-        // 实现邮件或短信通知逻辑
-        // 这里只是示例
-        System.out.println("发送密码重置通知给用户: " + userId + ", 新密码: " + newPassword);
+        return new ResetPasswordResult(userId, newPassword);
     }
 }
-

@@ -28,6 +28,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 @Service
 @RequiredArgsConstructor
@@ -83,58 +85,143 @@ public class TicketService {
         return toDetailDto(ticket);
     }
 
-
     @Transactional
-    public TicketDetailDto assignTicket(Long ticketId, TicketAssignRequest request) {
-        RepairTicket ticket = findTicket(ticketId);
-        User operator = userService.loadActiveUser(request.operatorId());
-        User staff = userService.loadActiveUser(request.staffId());
-        if (staff.getRole() != UserRole.STAFF) {
-            throw new BusinessException("仅维修工角色可以被分配");
+    public TicketDetailDto createTicket(TicketCreateRequest request, List<MultipartFile> images) {
+        User student = userService.loadActiveUser(request.studentId());
+        if (student.getRole() != UserRole.STUDENT) {
+            throw new BusinessException("仅学生账号可以提交报修单");
         }
-        ticket.setStaff(staff);
-        ticket.setAssignedAt(LocalDateTime.now());
-        TicketStatus oldStatus = ticket.getStatus();
-        ticket.setStatus(TicketStatus.IN_PROGRESS);
-        appendStatusLog(ticket, oldStatus, TicketStatus.IN_PROGRESS, operator);
+
+        // 验证分类是否存在
+        Category category = categoryService.getById(request.categoryId());
+        if (category == null) {
+            throw new BusinessException("指定的分类不存在");
+        }
+
+        RepairTicket ticket = new RepairTicket();
+        ticket.setStudent(student);
+        ticket.setCategory(category);
+        ticket.setLocationText(request.locationText());
+        ticket.setDescription(request.description());
+        ticket.setStatus(TicketStatus.WAITING_ACCEPT);
+        ticket.setCreatedAt(LocalDateTime.now());  // 明确设置
+        ticket.setPriority(request.priority());
+
+        // 关键修改：确保保存后获取到含有ID的实体
+        ticket = ticketRepository.save(ticket);
+
+        // 强制刷新确保数据写入数据库
+        ticketRepository.flush();
+
+        appendStatusLog(ticket, null, TicketStatus.WAITING_ACCEPT, student);
+
+        // 处理上传的图片文件（模拟保存，实际项目中需要保存到文件系统或云存储）
+        if (images != null && !images.isEmpty()) {
+            for (MultipartFile image : images) {
+                if (!image.isEmpty()) {
+                    // 这里应该将文件保存到文件系统或云存储，并获取URL
+                    // 为了演示目的，我们只是简单地记录文件名
+                    TicketImage ticketImage = new TicketImage();
+                    ticketImage.setTicket(ticket);
+                    ticketImage.setImageUrl("uploads/" + image.getOriginalFilename()); // 模拟URL
+                    ticketImage.setUploadedAt(LocalDateTime.now());
+                    imageRepository.save(ticketImage);
+                }
+            }
+        }
+
+        ticketRepository.flush();
         return toDetailDto(ticket);
     }
 
     @Transactional
+    public TicketDetailDto createTicketFromFormData(
+            String studentId,
+            Long categoryId,
+            String locationText,
+            String description,
+            String priority,
+            List<MultipartFile> images) {
+        // 构造请求对象
+        TicketCreateRequest request = new TicketCreateRequest(
+            studentId,
+            categoryId,
+            locationText,
+            description,
+            priority,
+            Collections.emptyList() // 图片URL将在后续处理
+        );
+        
+        return createTicket(request, images);
+    }
+
+    @Transactional
+    public TicketDetailDto assignTicket(Long ticketId, TicketAssignRequest request) {
+        try {
+            // 使用悲观锁防止并发分配
+            RepairTicket ticket = findTicketWithLock(ticketId);
+            User operator = userService.loadActiveUser(request.operatorId());
+            User staff = userService.loadActiveUser(request.staffId());
+            if (staff.getRole() != UserRole.STAFF) {
+                throw new BusinessException("仅维修工角色可以被分配");
+            }
+            // 检查工单是否已被分配给其他维修工
+            if (ticket.getStaff() != null 
+                    && !ticket.getStaff().getUserId().equals(request.staffId())
+                    && ticket.getStatus() != TicketStatus.WAITING_ACCEPT) {
+                throw new BusinessException("该工单已被分配给其他维修工：" + ticket.getStaff().getNickname());
+            }
+            ticket.setStaff(staff);
+            ticket.setAssignedAt(LocalDateTime.now());
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.IN_PROGRESS);
+            appendStatusLog(ticket, oldStatus, TicketStatus.IN_PROGRESS, operator);
+            return toDetailDto(ticket);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new BusinessException("工单已被其他用户修改，请刷新后重试");
+        }
+    }
+
+    @Transactional
     public TicketDetailDto updateStatus(Long ticketId, TicketStatusUpdateRequest request) {
-        RepairTicket ticket = findTicket(ticketId);
-        User operator = userService.loadActiveUser(request.operatorId());
-        TicketStatus oldStatus = ticket.getStatus();
-        TicketStatus newStatus = request.newStatus();
+        try {
+            // 使用悲观锁防止并发状态更新
+            RepairTicket ticket = findTicketWithLock(ticketId);
+            User operator = userService.loadActiveUser(request.operatorId());
+            TicketStatus oldStatus = ticket.getStatus();
+            TicketStatus newStatus = request.newStatus();
 
-        // 新增状态转换合法性校验
-        if (!isValidStatusTransition(oldStatus, newStatus)) {
-            throw new BusinessException("不允许从 " + oldStatus + " 转换到 " + newStatus);
-        }
-
-        // 状态变更逻辑（补充完整字段映射）
-        if (newStatus == TicketStatus.REJECTED) {
-            if (request.rejectionReason() == null || request.rejectionReason().isBlank()) {
-                throw new BusinessException("驳回时必须填写理由");
+            // 新增状态转换合法性校验
+            if (!isValidStatusTransition(oldStatus, newStatus)) {
+                throw new BusinessException("不允许从 " + oldStatus + " 转换到 " + newStatus);
             }
-            ticket.setRejectionReason(request.rejectionReason());
-            ticket.setStaff(null);
-            ticket.setAssignedAt(null);
-            ticket.setCompletedAt(null);
-            ticket.setClosedAt(LocalDateTime.now());
-        } else if (newStatus == TicketStatus.RESOLVED) {
-            ticket.setCompletedAt(LocalDateTime.now());
-        } else if (newStatus == TicketStatus.WAITING_FEEDBACK) {
-            if (ticket.getCompletedAt() == null) {
+
+            // 状态变更逻辑（补充完整字段映射）
+            if (newStatus == TicketStatus.REJECTED) {
+                if (request.rejectionReason() == null || request.rejectionReason().isBlank()) {
+                    throw new BusinessException("驳回时必须填写理由");
+                }
+                ticket.setRejectionReason(request.rejectionReason());
+                ticket.setStaff(null);
+                ticket.setAssignedAt(null);
+                ticket.setCompletedAt(null);
+                ticket.setClosedAt(LocalDateTime.now());
+            } else if (newStatus == TicketStatus.RESOLVED) {
                 ticket.setCompletedAt(LocalDateTime.now());
+            } else if (newStatus == TicketStatus.WAITING_FEEDBACK) {
+                if (ticket.getCompletedAt() == null) {
+                    ticket.setCompletedAt(LocalDateTime.now());
+                }
+            } else if (newStatus == TicketStatus.CLOSED) {
+                ticket.setClosedAt(LocalDateTime.now());
             }
-        } else if (newStatus == TicketStatus.CLOSED) {
-            ticket.setClosedAt(LocalDateTime.now());
-        }
 
-        ticket.setStatus(newStatus);
-        appendStatusLog(ticket, oldStatus, newStatus, operator);
-        return toDetailDto(ticket);
+            ticket.setStatus(newStatus);
+            appendStatusLog(ticket, oldStatus, newStatus, operator);
+            return toDetailDto(ticket);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new BusinessException("工单已被其他用户修改，请刷新后重试");
+        }
     }
 
     // 新增状态转换规则校验方法
@@ -168,29 +255,43 @@ public class TicketService {
 
     @Transactional
     public TicketDetailDto rateTicket(Long ticketId, TicketRatingRequest request) {
-        RepairTicket ticket = findTicket(ticketId);
-        if (ticket.getStatus() != TicketStatus.WAITING_FEEDBACK) {
-            throw new BusinessException("当前状态不可评价");
-        }
-        if (!Objects.equals(ticket.getStudent().getUserId(), request.studentId())) {
-            throw new BusinessException("仅提交该报修单的学生可以评价");
-        }
-        if (ratingRepository.existsByTicket(ticket)) {
-            throw new BusinessException("该报修单已评价");
-        }
-        Rating rating = new Rating();
-        rating.setTicket(ticket);
-        rating.setStudent(ticket.getStudent());
-        rating.setStaff(ticket.getStaff());
-        rating.setScore(request.score());
-        rating.setComment(request.comment());
-        ratingRepository.save(rating);
+        try {
+            // 使用悲观锁防止并发评价
+            RepairTicket ticket = findTicketWithLock(ticketId);
+            if (!Objects.equals(ticket.getStudent().getUserId(), request.studentId())) {
+                throw new BusinessException("仅提交该报修单的学生可以评价");
+            }
+            if (ratingRepository.existsByTicket(ticket)) {
+                throw new BusinessException("该报修单已评价");
+            }
 
-        TicketStatus oldStatus = ticket.getStatus();
-        ticket.setStatus(TicketStatus.FEEDBACKED);
-        ticket.setClosedAt(LocalDateTime.now());
-        appendStatusLog(ticket, oldStatus, TicketStatus.FEEDBACKED, ticket.getStudent());
-        return toDetailDto(ticket);
+            // 允许在以下状态下评价：
+            // - WAITING_FEEDBACK：正常待评价
+            // - RESOLVED：已完成但还未进入待评价状态
+            // - CLOSED：已关闭但尚未评价（例如管理员直接关闭）
+            TicketStatus status = ticket.getStatus();
+            if (status != TicketStatus.WAITING_FEEDBACK
+                    && status != TicketStatus.RESOLVED
+                    && status != TicketStatus.CLOSED) {
+                throw new BusinessException("当前状态不可评价");
+            }
+
+            Rating rating = new Rating();
+            rating.setTicket(ticket);
+            rating.setStudent(ticket.getStudent());
+            rating.setStaff(ticket.getStaff());
+            rating.setScore(request.score());
+            rating.setComment(request.comment());
+            ratingRepository.save(rating);
+
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.FEEDBACKED);
+            ticket.setClosedAt(LocalDateTime.now());
+            appendStatusLog(ticket, oldStatus, TicketStatus.FEEDBACKED, ticket.getStudent());
+            return toDetailDto(ticket);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new BusinessException("工单已被其他用户修改，请刷新后重试");
+        }
     }
 
     // 新增方法：更新维修备注
@@ -241,6 +342,41 @@ public class TicketService {
         return toDetailDto(ticket);
     }
 
+    /**
+     * 学生删除自己的报修单：软删除（标记删除），仅允许删除待受理状态的工单
+     */
+    @Transactional
+    public void deleteTicket(Long ticketId, String studentId) {
+        try {
+            User student = userService.loadActiveUser(studentId);
+            // 使用悲观锁防止并发删除
+            RepairTicket ticket = findTicketWithLock(ticketId);
+
+            // 必须是本人提交的工单
+            if (ticket.getStudent() == null ||
+                    !Objects.equals(ticket.getStudent().getUserId(), student.getUserId())) {
+                throw new BusinessException(HttpStatus.FORBIDDEN, "只能删除自己提交的报修单");
+            }
+
+            // 检查是否已经删除
+            if (Boolean.TRUE.equals(ticket.getDeleted())) {
+                throw new BusinessException("该工单已被删除");
+            }
+
+            // 仅允许删除待受理状态的工单
+            if (ticket.getStatus() != TicketStatus.WAITING_ACCEPT) {
+                throw new BusinessException("仅待受理状态的报修单可以删除");
+            }
+
+            // 软删除：标记为已删除，不物理删除数据
+            ticket.setDeleted(true);
+            ticket.setDeletedAt(LocalDateTime.now());
+            ticketRepository.save(ticket);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new BusinessException("工单已被其他用户修改，请刷新后重试");
+        }
+    }
+
     @Transactional
     public List<TicketSummaryDto> listByStudent(String studentId) {
         User student = userService.loadActiveUser(studentId);
@@ -253,9 +389,35 @@ public class TicketService {
 
     @Transactional
     public List<TicketSummaryDto> listByStaff(String staffId) {
+        System.out.println("TicketService.listByStaff - 维修工ID: " + staffId);
         User staff = userService.loadActiveUser(staffId);
-        return ticketRepository.findByStaff(staff)
-            .stream()
+        System.out.println("找到用户: " + staff.getUserId() + ", 角色: " + staff.getRole());
+        
+        // 查询分配给该维修工的所有任务
+        List<RepairTicket> tickets = ticketRepository.findByStaff(staff);
+        System.out.println("数据库查询到的工单数量: " + tickets.size());
+        
+        if (tickets.isEmpty()) {
+            System.out.println("警告：没有找到分配给维修工 " + staffId + " 的任务");
+            // 检查数据库中是否有任何任务
+            long totalTickets = ticketRepository.count();
+            System.out.println("数据库中总任务数: " + totalTickets);
+            // 检查有多少任务已经分配了维修工
+            List<RepairTicket> allTickets = ticketRepository.findAll();
+            long assignedCount = allTickets.stream()
+                .filter(t -> t.getStaff() != null)
+                .count();
+            System.out.println("已分配的任务数: " + assignedCount);
+            System.out.println("未分配的任务数: " + (totalTickets - assignedCount));
+        } else {
+            for (RepairTicket ticket : tickets) {
+                System.out.println("工单ID: " + ticket.getTicketId() + 
+                                 ", 状态: " + ticket.getStatus() + 
+                                 ", 维修工ID: " + (ticket.getStaff() != null ? ticket.getStaff().getUserId() : "null"));
+            }
+        }
+        
+        return tickets.stream()
             .sorted(Comparator.comparing(RepairTicket::getCreatedAt).reversed())
             .map(this::toSummaryDto)
             .collect(Collectors.toList());
@@ -272,8 +434,14 @@ public class TicketService {
 
     @Transactional
     public List<TicketSummaryDto> listAll() {
-        return ticketRepository.findAll()
-            .stream()
+        return listAll(false);
+    }
+
+    @Transactional
+    public List<TicketSummaryDto> listAll(boolean includeDeleted) {
+        List<RepairTicket> tickets = ticketRepository.findAll();
+        return tickets.stream()
+            .filter(t -> includeDeleted || !Boolean.TRUE.equals(t.getDeleted()))
             .sorted(Comparator.comparing(RepairTicket::getCreatedAt).reversed())
             .map(this::toSummaryDto)
             .collect(Collectors.toList());
@@ -308,15 +476,55 @@ public class TicketService {
     public List<RepairmanRatingStatsDto> getRepairmanRatingStats() {
         List<Object[]> results = ticketRepository.findRepairmanRatingStats();
         return results.stream()
-            .map(row -> new RepairmanRatingStatsDto(
-                (String) row[0],
-                (String) row[1],
-                ((Double) row[2]).intValue(),  // 平均分
-                ((Long) row[3]).intValue()      // 报修单数
-            ))
+            .map(row -> {
+                String id = (String) row[0];
+                String name = (String) row[1];
+                Number avgRatingNum = (Number) row[2];
+                Number completedNum = (Number) row[3];
+                int rating = avgRatingNum != null ? (int) Math.round(avgRatingNum.doubleValue()) : 0;
+                int completed = completedNum != null ? completedNum.intValue() : 0;
+                return new RepairmanRatingStatsDto(id, name, rating, completed);
+            })
             // 限制返回前10条记录
             .limit(10)
             .collect(Collectors.toList());
+    }
+
+    // 新增方法：基于视图获取按类别的统计数据，供 DataAnalysis 使用
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getCategoryStatsFromView() {
+        List<Object[]> results = ticketRepository.findCategoryStatsFromView();
+        List<Map<String, Object>> stats = new ArrayList<>();
+
+        for (Object[] row : results) {
+            String categoryKey = (String) row[0];
+            String categoryName = (String) row[1];
+            // 原生 SQL 聚合函数在 MySQL 中通常返回 BigDecimal，这里统一用 Number 再转为整数，避免 ClassCastException
+            Number totalTicketsNum = (Number) row[2];
+            Number completedTicketsNum = (Number) row[3];
+            Number ratedTicketsNum = (Number) row[4];
+            Number avgRatingNum = (Number) row[5];
+
+            Map<String, Object> item = new HashMap<>();
+            // 前端 DataAnalysis 目前使用的字段
+            item.put("category", categoryName);
+            item.put("name", categoryName);
+            item.put("type", categoryName);
+            int total = totalTicketsNum != null ? totalTicketsNum.intValue() : 0;
+            item.put("count", total);
+            item.put("value", total);
+
+            // 额外提供更详细的统计信息，便于后续扩展
+            item.put("categoryKey", categoryKey);
+            item.put("totalTickets", total);
+            item.put("completedTickets", completedTicketsNum != null ? completedTicketsNum.intValue() : 0);
+            item.put("ratedTickets", ratedTicketsNum != null ? ratedTicketsNum.intValue() : 0);
+            item.put("avgRating", avgRatingNum != null ? avgRatingNum.doubleValue() : 0.0);
+
+            stats.add(item);
+        }
+
+        return stats;
     }
 
     // 新增方法：获取月度统计数据
@@ -353,6 +561,14 @@ public class TicketService {
 
     private RepairTicket findTicket(Long ticketId) {
         return ticketRepository.findById(ticketId)
+            .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "报修单不存在"));
+    }
+
+    /**
+     * 使用悲观锁查找工单（用于关键操作，防止并发修改）
+     */
+    private RepairTicket findTicketWithLock(Long ticketId) {
+        return ticketRepository.findByIdWithLock(ticketId)
             .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "报修单不存在"));
     }
 
@@ -418,6 +634,11 @@ public class TicketService {
     }
 
     private TicketSummaryDto toSummaryDto(RepairTicket ticket) {
+        // 查询该工单的评分（如果存在），用于给维修工统计平均分
+        Integer ratingScore = ratingRepository.findByTicket(ticket)
+            .map(Rating::getScore)
+            .orElse(null);
+
         return new TicketSummaryDto(
             ticket.getTicketId(),
             ticket.getStatus(),
@@ -425,8 +646,14 @@ public class TicketService {
             ticket.getStudent() != null ? ticket.getStudent().getUserId() : null,
             ticket.getStaff() != null ? ticket.getStaff().getUserId() : null,
             ticket.getLocationText(),
+            ticket.getDescription(),
             ticket.getPriority(),
-            ticket.getCreatedAt()
+            ticket.getCreatedAt(),
+            ticket.getAssignedAt(),
+            ticket.getEstimatedCompletionTime(),
+            ratingScore,
+            ticket.getDeleted(),
+            ticket.getDeletedAt()
         );
     }
 }

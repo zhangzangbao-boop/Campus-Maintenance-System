@@ -15,7 +15,9 @@ import org.springframework.stereotype.Component;
 public class JwtUtil {
     
     // JWT密钥（实际项目中应该从配置文件读取）
-    private Key SECRET_KEY = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+    // 使用固定的密钥以防止每次重启后令牌失效
+    private static final String SECRET = "mySecretKeyForCampusMaintenanceSystem123456";
+    private Key SECRET_KEY = Keys.hmacShaKeyFor(SECRET.getBytes());
     
     // Token有效期7天
     private static final long JWT_TOKEN_VALIDITY = 7 * 24 * 60 * 60 * 1000;

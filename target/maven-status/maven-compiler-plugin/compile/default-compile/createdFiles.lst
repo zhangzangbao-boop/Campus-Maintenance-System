@@ -1,4 +1,5 @@
 com\ligong\reportingcenter\dto\CategoryDto.class
+com\ligong\reportingcenter\dto\BackupDto.class
 com\ligong\reportingcenter\domain\enums\TicketStatus.class
 com\ligong\reportingcenter\dto\RepairmanRatingStatsDto.class
 com\ligong\reportingcenter\dto\request\UserRegisterRequest.class
@@ -34,6 +35,8 @@ com\ligong\reportingcenter\controller\UserController.class
 com\ligong\reportingcenter\dto\LocationStatsDto.class
 com\ligong\reportingcenter\RepairingCenterApplication.class
 com\ligong\reportingcenter\dto\TicketDetailDto.class
+com\ligong\reportingcenter\service\BackupService.class
+com\ligong\reportingcenter\config\JwtAuthenticationFilter.class
 com\ligong\reportingcenter\controller\TicketController$UpdateNotesRequest.class
 com\ligong\reportingcenter\service\RatingService.class
 com\ligong\reportingcenter\dto\request\LoginRequest.class
@@ -52,5 +55,7 @@ com\ligong\reportingcenter\dto\request\CategoryRequest.class
 com\ligong\reportingcenter\repository\RatingRepository.class
 com\ligong\reportingcenter\domain\entity\TicketImage.class
 com\ligong\reportingcenter\dto\request\TicketRatingRequest.class
+com\ligong\reportingcenter\config\BackupScheduler.class
 com\ligong\reportingcenter\config\SecurityConfig.class
+com\ligong\reportingcenter\controller\BackupController.class
 com\ligong\reportingcenter\controller\TicketController.class
