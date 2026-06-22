@@ -108,25 +108,43 @@ public class TicketController {
         } catch (Exception e) {
             throw new BusinessException("无法获取当前用户信息，请先登录");
         }
-        
+
+        System.out.println("=== 查询学生报修单 ===");
+        System.out.println("学生ID: " + studentId);
+        System.out.println("状态筛选: " + status);
+
+        // 先获取该学生的所有工单
+        List<TicketSummaryDto> allTickets = ticketService.listByStudent(studentId);
+        System.out.println("该学生的所有工单数量: " + allTickets.size());
+
         List<TicketSummaryDto> tickets;
-        if (status != null && !status.isBlank()) {
-            try {
-                TicketStatus ticketStatus = TicketStatus.valueOf(status.toUpperCase());
-                tickets = ticketService.listByStatus(ticketStatus);
-            } catch (IllegalArgumentException ex) {
-                throw new BusinessException("无效的工单状态");
-            }
+
+        // 根据状态筛选
+        if (status != null && !status.isBlank() && !"all".equalsIgnoreCase(status)) {
+            // 将前端状态值映射到后端状态值
+            TicketStatus ticketStatus = mapStatusFromFrontend(status);
+            System.out.println("映射后的状态: " + ticketStatus);
+
+            // 在该学生的工单中筛选状态
+            tickets = allTickets.stream()
+                .filter(t -> t.status() == ticketStatus)
+                .collect(java.util.stream.Collectors.toList());
+            System.out.println("筛选后的工单数量: " + tickets.size());
         } else {
-            tickets = ticketService.listByStudent(studentId);
+            // 不筛选状态，返回所有工单
+            tickets = allTickets;
+            System.out.println("返回所有工单，数量: " + tickets.size());
         }
-        
+
         // 简单分页模拟
         int total = tickets.size();
         int fromIndex = page * size;
         int toIndex = Math.min(fromIndex + size, total);
         List<TicketSummaryDto> pagedTickets = fromIndex < total ? tickets.subList(fromIndex, toIndex) : new java.util.ArrayList<>();
-        
+
+        System.out.println("分页后的工单数量: " + pagedTickets.size());
+        System.out.println("===================");
+
         // 返回统一格式的响应
         Map<String, Object> result = new HashMap<>();
         result.put("code", 200);

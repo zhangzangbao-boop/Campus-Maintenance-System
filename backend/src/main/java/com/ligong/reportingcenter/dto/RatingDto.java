@@ -7,7 +7,10 @@ public record RatingDto(
     Integer score,
     String comment,
     String studentId,
+    String studentName,  // 新增：学生姓名
     String staffId,
+    String staffName,    // 新增：维修人员姓名
+    Long repairOrderId,  // 新增：报修单ID
     LocalDateTime ratedAt
 ) {
 }

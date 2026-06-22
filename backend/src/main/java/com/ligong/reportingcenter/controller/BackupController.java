@@ -90,17 +90,34 @@ public class BackupController {
      * 删除备份文件
      */
     @DeleteMapping("/{fileName}")
-    public ResponseEntity<Map<String, Object>> deleteBackup(@PathVariable String fileName) {
+    public ResponseEntity<Map<String, Object>> deleteBackup(@PathVariable("fileName") String fileName) {
         try {
-            backupService.deleteBackup(fileName);
+            System.out.println("收到删除备份请求，文件名: " + fileName);
+
+            if (fileName == null || fileName.trim().isEmpty()) {
+                System.out.println("文件名为空，拒绝删除");
+                Map<String, Object> result = new HashMap<>();
+                result.put("code", 400);
+                result.put("message", "文件名不能为空");
+                return ResponseEntity.badRequest().body(result);
+            }
+
+            backupService.deleteBackup(fileName.trim());
+            System.out.println("删除备份成功: " + fileName);
+
             Map<String, Object> result = new HashMap<>();
             result.put("code", 200);
-            result.put("message", "删除成功");
+            result.put("message", "备份已删除");
+            result.put("fileName", fileName);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
+            System.out.println("删除备份失败: " + fileName + ", 错误: " + e.getMessage());
+            e.printStackTrace();
+
             Map<String, Object> result = new HashMap<>();
             result.put("code", 500);
-            result.put("message", "删除失败: " + e.getMessage());
+            result.put("message", "删除备份失败: " + e.getMessage());
+            result.put("fileName", fileName);
             return ResponseEntity.status(500).body(result);
         }
     }

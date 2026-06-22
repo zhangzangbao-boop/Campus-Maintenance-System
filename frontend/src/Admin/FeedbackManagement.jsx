@@ -54,10 +54,19 @@ const FeedbackManagement = () => {
 
   // 渲染每条评价卡片
   const renderFeedbackCard = (feedback) => {
-    // 使用API返回的维修人员姓名，如果没有则使用备用方法
-    const repairmanName = feedback.repairmanName || 
-      feedbackService.getRepairmanInfo(feedback.repairmanId).name;
-    
+    // 直接使用API返回的维修人员姓名
+    const repairmanName = feedback.repairmanName || '未知维修工';
+    const studentName = feedback.studentName || feedback.studentId || '未知学生';
+
+    console.log('评价卡片数据:', {
+      id: feedback.id,
+      repairmanId: feedback.repairmanId,
+      repairmanName: repairmanName,
+      studentId: feedback.studentId,
+      studentName: studentName,
+      repairOrderId: feedback.repairOrderId
+    });
+
     // 根据评分设置标签颜色
     const getRatingTagColor = (rating) => {
       if (rating >= 4) return 'green';
@@ -71,7 +80,7 @@ const FeedbackManagement = () => {
     return (
       <Card
         key={feedback.id}
-        style={{ 
+        style={{
           marginBottom: 16,
           border: inappropriate ? '1px solid #ff4d4f' : '1px solid #d9d9d9'
         }}
@@ -84,7 +93,7 @@ const FeedbackManagement = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <Space>
                 <span style={{ fontWeight: 'bold' }}>评价 #{feedback.id}</span>
-                <Tag color="blue">报修单: {feedback.repairOrderId}</Tag>
+                <Tag color="blue">报修单: {feedback.repairOrderId || '未知'}</Tag>
               </Space>
               <Tag color={getRatingTagColor(feedback.rating)}>
                 {feedback.rating}星
@@ -100,7 +109,7 @@ const FeedbackManagement = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <UserOutlined style={{ marginRight: 4 }} />
-                <strong>评价人:</strong> {feedback.studentName || feedback.studentId}
+                <strong>评价人:</strong> {studentName}
               </div>
               <div>
                 <UserOutlined style={{ marginRight: 4 }} />

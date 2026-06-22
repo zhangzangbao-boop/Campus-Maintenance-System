@@ -201,9 +201,53 @@ export const repairService = {
   // 根据ID获取单个工单
   getRepairOrderById: async (id) => {
     try {
+      console.log('获取工单详情，工单ID:', id);
       const response = await api.student.getOrderDetail(id);
+      console.log('获取工单详情响应:', response);
+
       if (response.code === 200) {
-        return response.data;
+        const orderDetail = response.data;
+        console.log('原始工单详情数据:', orderDetail);
+
+        // 映射后端字段到前端字段，确保数据格式一致
+        const mappedDetail = {
+          ...orderDetail,
+          id: orderDetail.ticketId || orderDetail.id,
+          ticketId: orderDetail.ticketId || orderDetail.id,
+          category: orderDetail.categoryName || orderDetail.category,
+          location: orderDetail.locationText || orderDetail.location,
+          description: orderDetail.description || '',
+          created_at: orderDetail.createdAt || orderDetail.created_at,
+          assigned_at: orderDetail.assignedAt || orderDetail.assigned_at,
+          completed_at: orderDetail.completedAt || orderDetail.completed_at,
+          rejection_reason: orderDetail.rejectionReason || orderDetail.rejection_reason,
+          studentID: orderDetail.studentId || orderDetail.studentID,
+          studentName: orderDetail.studentNickname || orderDetail.studentName || '未知',
+          repairmanId: orderDetail.staffId || orderDetail.repairmanId || null,
+          repairmanName: orderDetail.staffNickname || orderDetail.staffName || null,
+          status: mapStatusToFrontend(orderDetail.status), // 映射状态
+          // 确保 title 正确
+          title: (orderDetail.title && orderDetail.title !== orderDetail.description)
+            ? orderDetail.title
+            : (orderDetail.locationText ? `报修-${orderDetail.locationText}` : '报修单'),
+          // 评价信息
+          rating: orderDetail.rating?.score || orderDetail.rating || null,
+          feedback: orderDetail.rating?.comment || orderDetail.feedback || null,
+          // 维修备注
+          repairNotes: orderDetail.repairNotes || null,
+          processNotes: orderDetail.processNotes || null,
+          // 处理图片
+          images: (orderDetail.images || []).map(img => {
+            if (typeof img === 'string') {
+              return img.startsWith('http') ? img : `http://localhost:8080${img.startsWith('/') ? '' : '/'}${img}`;
+            }
+            const imageUrl = img.imageUrl || img.url || img;
+            return imageUrl.startsWith('http') ? imageUrl : `http://localhost:8080${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+          }),
+        };
+
+        console.log('映射后的工单详情:', mappedDetail);
+        return mappedDetail;
       } else {
         throw new Error(response.message || '获取工单详情失败');
       }

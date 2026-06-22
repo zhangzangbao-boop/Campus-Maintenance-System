@@ -24,7 +24,14 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +48,9 @@ public class TicketService {
     private final RatingRepository ratingRepository;
     private final UserService userService;
     private final CategoryService categoryService;
+
+    @Value("${upload.path:./uploads}")
+    private String uploadPath;
 
     @Transactional
     public TicketDetailDto createTicket(TicketCreateRequest request) {
@@ -115,18 +125,39 @@ public class TicketService {
 
         appendStatusLog(ticket, null, TicketStatus.WAITING_ACCEPT, student);
 
-        // 处理上传的图片文件（模拟保存，实际项目中需要保存到文件系统或云存储）
+        // 处理上传的图片文件，保存到文件系统
         if (images != null && !images.isEmpty()) {
-            for (MultipartFile image : images) {
-                if (!image.isEmpty()) {
-                    // 这里应该将文件保存到文件系统或云存储，并获取URL
-                    // 为了演示目的，我们只是简单地记录文件名
-                    TicketImage ticketImage = new TicketImage();
-                    ticketImage.setTicket(ticket);
-                    ticketImage.setImageUrl("uploads/" + image.getOriginalFilename()); // 模拟URL
-                    ticketImage.setUploadedAt(LocalDateTime.now());
-                    imageRepository.save(ticketImage);
+            try {
+                // 创建上传目录
+                Path uploadDir = Paths.get(uploadPath);
+                if (!Files.exists(uploadDir)) {
+                    Files.createDirectories(uploadDir);
                 }
+
+                for (MultipartFile image : images) {
+                    if (!image.isEmpty()) {
+                        // 生成唯一文件名
+                        String originalFilename = image.getOriginalFilename();
+                        String extension = "";
+                        if (originalFilename != null && originalFilename.contains(".")) {
+                            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+                        }
+                        String filename = UUID.randomUUID().toString() + extension;
+
+                        // 保存文件到文件系统
+                        Path filePath = uploadDir.resolve(filename);
+                        Files.write(filePath, image.getBytes());
+
+                        // 保存图片URL到数据库
+                        TicketImage ticketImage = new TicketImage();
+                        ticketImage.setTicket(ticket);
+                        ticketImage.setImageUrl("/uploads/" + filename);
+                        ticketImage.setUploadedAt(LocalDateTime.now());
+                        imageRepository.save(ticketImage);
+                    }
+                }
+            } catch (IOException e) {
+                throw new BusinessException("图片保存失败: " + e.getMessage());
             }
         }
 
@@ -343,7 +374,8 @@ public class TicketService {
     }
 
     /**
-     * 学生删除自己的报修单：软删除（标记删除），仅允许删除待受理状态的工单
+     * 学生删除自己的报修单：物理删除（从数据库中彻底删除）
+     * 仅允许删除待受理状态的工单
      */
     @Transactional
     public void deleteTicket(Long ticketId, String studentId) {
@@ -358,20 +390,51 @@ public class TicketService {
                 throw new BusinessException(HttpStatus.FORBIDDEN, "只能删除自己提交的报修单");
             }
 
-            // 检查是否已经删除
-            if (Boolean.TRUE.equals(ticket.getDeleted())) {
-                throw new BusinessException("该工单已被删除");
-            }
-
             // 仅允许删除待受理状态的工单
             if (ticket.getStatus() != TicketStatus.WAITING_ACCEPT) {
                 throw new BusinessException("仅待受理状态的报修单可以删除");
             }
 
-            // 软删除：标记为已删除，不物理删除数据
-            ticket.setDeleted(true);
-            ticket.setDeletedAt(LocalDateTime.now());
-            ticketRepository.save(ticket);
+            // 先删除关联的图片
+            List<TicketImage> images = ticket.getImages();
+            if (images != null && !images.isEmpty()) {
+                for (TicketImage image : images) {
+                    // 删除文件系统中的图片文件
+                    String imageUrl = image.getImageUrl();
+                    if (imageUrl != null && imageUrl.startsWith("/uploads/")) {
+                        try {
+                            String filename = imageUrl.substring("/uploads/".length());
+                            Path filePath = Paths.get(uploadPath, filename);
+                            if (Files.exists(filePath)) {
+                                Files.delete(filePath);
+                                System.out.println("已删除图片文件: " + filePath);
+                            }
+                        } catch (IOException e) {
+                            System.out.println("删除图片文件失败: " + e.getMessage());
+                        }
+                    }
+                    // 删除数据库中的图片记录
+                    imageRepository.delete(image);
+                }
+            }
+
+            // 删除关联的状态日志
+            List<TicketStatusLog> statusLogs = ticket.getStatusLogs();
+            if (statusLogs != null && !statusLogs.isEmpty()) {
+                statusLogRepository.deleteAll(statusLogs);
+            }
+
+            // 删除关联的评价（如果存在）
+            Optional<Rating> ratingOpt = ratingRepository.findByTicket(ticket);
+            if (ratingOpt.isPresent()) {
+                ratingRepository.delete(ratingOpt.get());
+            }
+
+            // 最后删除工单本身（物理删除）
+            ticketRepository.delete(ticket);
+            ticketRepository.flush();
+
+            System.out.println("已物理删除工单ID: " + ticketId);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new BusinessException("工单已被其他用户修改，请刷新后重试");
         }
@@ -392,11 +455,11 @@ public class TicketService {
         System.out.println("TicketService.listByStaff - 维修工ID: " + staffId);
         User staff = userService.loadActiveUser(staffId);
         System.out.println("找到用户: " + staff.getUserId() + ", 角色: " + staff.getRole());
-        
+
         // 查询分配给该维修工的所有任务
         List<RepairTicket> tickets = ticketRepository.findByStaff(staff);
         System.out.println("数据库查询到的工单数量: " + tickets.size());
-        
+
         if (tickets.isEmpty()) {
             System.out.println("警告：没有找到分配给维修工 " + staffId + " 的任务");
             // 检查数据库中是否有任何任务
@@ -411,12 +474,12 @@ public class TicketService {
             System.out.println("未分配的任务数: " + (totalTickets - assignedCount));
         } else {
             for (RepairTicket ticket : tickets) {
-                System.out.println("工单ID: " + ticket.getTicketId() + 
-                                 ", 状态: " + ticket.getStatus() + 
+                System.out.println("工单ID: " + ticket.getTicketId() +
+                                 ", 状态: " + ticket.getStatus() +
                                  ", 维修工ID: " + (ticket.getStaff() != null ? ticket.getStaff().getUserId() : "null"));
             }
         }
-        
+
         return tickets.stream()
             .sorted(Comparator.comparing(RepairTicket::getCreatedAt).reversed())
             .map(this::toSummaryDto)

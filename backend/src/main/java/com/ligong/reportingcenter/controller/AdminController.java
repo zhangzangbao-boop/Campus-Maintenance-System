@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/admin")
@@ -47,13 +49,13 @@ public class AdminController {
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
         List<UserDto> allUsers = userService.listAll();
-        
+
         // 简单分页模拟
         int total = allUsers.size();
         int fromIndex = page * size;
         int toIndex = Math.min(fromIndex + size, total);
         List<UserDto> pagedUsers = allUsers.subList(fromIndex, toIndex);
-        
+
         return new PagedResult<>(pagedUsers, total);
     }
 
@@ -83,21 +85,32 @@ public class AdminController {
     public PagedResult<RatingDto> listFeedbacks(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
-        List<RatingDto> allRatings = ratingService.listAll();
-        
-        // 简单分页模拟
-        int total = allRatings.size();
-        int fromIndex = page * size;
-        int toIndex = Math.min(fromIndex + size, total);
-        List<RatingDto> pagedRatings = allRatings.subList(fromIndex, toIndex);
-        
-        return new PagedResult<>(pagedRatings, total);
+        try {
+            log.info("管理员请求获取评价列表: page={}, size={}", page, size);
+            List<RatingDto> allRatings = ratingService.listAll();
+            log.info("查询到 {} 条评价记录", allRatings.size());
+
+            // 简单分页模拟
+            int total = allRatings.size();
+            int fromIndex = Math.min(page * size, total);
+            int toIndex = Math.min(fromIndex + size, total);
+            List<RatingDto> pagedRatings = fromIndex < total ?
+                allRatings.subList(fromIndex, toIndex) : List.of();
+
+            PagedResult<RatingDto> result = new PagedResult<>(pagedRatings, total);
+            log.info("返回分页结果: list.size={}, total={}", result.getList().size(), result.getTotal());
+            return result;
+        } catch (Exception e) {
+            log.error("获取评价列表失败", e);
+            throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "获取评价列表失败: " + e.getMessage());
+        }
     }
 
     @DeleteMapping("/feedbacks/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteFeedback(@PathVariable Long id) {
+        log.info("管理员请求删除评价: id={}", id);
         ratingService.delete(id);
     }
 

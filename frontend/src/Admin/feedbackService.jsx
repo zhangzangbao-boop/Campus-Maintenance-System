@@ -33,11 +33,14 @@ export const feedbackService = {
         rating: item.score ?? item.rating ?? 0,
         // 评论内容
         comment: item.comment ?? '',
-        // 学生/维修工标识
+        // 学生信息
         studentId: item.studentId ?? item.studentID,
-        studentName: item.studentName ?? null, // 后端暂未提供姓名，这里预留字段
+        studentName: item.studentName ?? null, // 使用后端返回的学生姓名
+        // 维修人员信息
         repairmanId: item.staffId ?? item.repairmanId,
-        repairmanName: item.repairmanName ?? null,
+        repairmanName: item.staffName ?? item.repairmanName ?? null, // 使用后端返回的维修人员姓名
+        // 报修单ID
+        repairOrderId: item.repairOrderId ?? null,
         // 时间字段
         createdAt: item.ratedAt ?? item.createdAt ?? item.created_at,
       }));

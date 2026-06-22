@@ -230,13 +230,19 @@ const AdminHome = () => {
             padding: 0,
             background: "#FFFFFF",
             minHeight: "calc(100vh - 96px)",
+            maxHeight: "calc(100vh - 96px)",
+            overflow: 'auto',
+            overflowX: 'hidden',
+            overflowY: 'auto'
           }}
         >
           <div style={{
             background: "#F8FAFC",
             borderRadius: "8px",
             padding: "20px",
-            minHeight: "calc(100vh - 136px)",
+            minHeight: "auto",
+            height: "auto",
+            overflow: "visible"
           }}>
             {currentMenu === "user-management" && <UserManagement />}
 

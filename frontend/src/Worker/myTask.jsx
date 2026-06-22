@@ -1,9 +1,9 @@
 // src/components/MyTask.jsx
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, Tag, Button, Space, Select, Input, 
-  Modal, Form,  Card, Row, Col, 
-  Statistic, Progress, Descriptions, Image
+import {
+  Table, Tag, Button, Space, Select, Input,
+  Modal, Form,  Card, Row, Col,
+  Statistic, Progress, Descriptions, Image, message
 } from 'antd';
 import { SearchOutlined, PlayCircleOutlined, CheckCircleOutlined,
   EditOutlined, EyeOutlined, ClockCircleOutlined,
@@ -59,10 +59,12 @@ const MyTask = () => {
   const loadTasks = async (searchFilters = {}) => {
     if (!currentRepairmanId) {
       console.warn('无法加载任务：维修工ID为空');
+      message.warn('无法获取用户信息，请重新登录');
       setTasks([]);
+      setFilteredTasks([]);
       return;
     }
-    
+
     setLoading(true);
     try {
       // 仅将状态筛选传给后端，其它筛选在前端本地处理
@@ -72,15 +74,64 @@ const MyTask = () => {
         requestFilters.status = mergedFilters.status;
       }
 
-      console.log('开始加载任务，后端请求参数:', { currentRepairmanId, requestFilters });
+      console.log('开始加载任务，维修工ID:', currentRepairmanId, '请求参数:', requestFilters);
       const result = await mytaskService.getMyTasks(currentRepairmanId, requestFilters);
       console.log('获取到的任务数据:', result);
       console.log('任务列表数量:', result.data?.length || 0);
-      setTasks(result.data || []);
+
+      if (result.data && result.data.length > 0) {
+        console.log('任务详情:', result.data.map(t => ({
+          id: t.id || t.ticketId,
+          status: t.status,
+          originalStatus: t.originalStatus,
+          location: t.location
+        })));
+      }
+
+      // 设置任务列表
+      const newTasks = result.data || [];
+      setTasks(newTasks);
+
+      // 立即应用本地筛选（确保 filteredTasks 同步更新）
+      let filtered = [...newTasks];
+
+      // 应用状态筛选
+      if (mergedFilters.status && mergedFilters.status !== 'all') {
+        filtered = filtered.filter(task => {
+          const taskStatus = task.status || task.originalStatus;
+          return taskStatus === mergedFilters.status;
+        });
+      }
+
+      // 应用分类筛选
+      if (mergedFilters.category && mergedFilters.category !== 'all') {
+        filtered = filtered.filter(task => task.category === mergedFilters.category);
+      }
+
+      // 应用优先级筛选
+      if (mergedFilters.priority && mergedFilters.priority !== 'all') {
+        filtered = filtered.filter(task => task.priority === mergedFilters.priority);
+      }
+
+      // 应用关键词筛选
+      if (mergedFilters.keyword && mergedFilters.keyword.trim() !== '') {
+        const kw = mergedFilters.keyword.trim().toLowerCase();
+        filtered = filtered.filter(task => {
+          const location = (task.location || '').toLowerCase();
+          const desc = (task.description || '').toLowerCase();
+          const studentName = (task.studentName || task.studentId || '').toLowerCase();
+          return location.includes(kw) || desc.includes(kw) || studentName.includes(kw);
+        });
+      }
+
+      setFilteredTasks(filtered);
+      console.log('设置过滤后的任务列表:', filtered.length, '条');
+
     } catch (error) {
       console.error('加载任务失败:', error);
-      setTasks([]); // 确保即使出错也设置为空数组
-      // 错误信息已经在service中显示，这里不需要重复显示
+      setTasks([]);
+      setFilteredTasks([]);
+      message.error('加载任务失败: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -145,7 +196,10 @@ const MyTask = () => {
 
     // 状态筛选：后端已按状态过滤，但这里再兜底一次
     if (filters.status && filters.status !== 'all') {
-      result = result.filter(task => task.status === filters.status);
+      result = result.filter(task => {
+        const taskStatus = task.status || task.originalStatus;
+        return taskStatus === filters.status;
+      });
     }
 
     // 分类筛选
@@ -233,18 +287,33 @@ const MyTask = () => {
         message.error('任务ID不存在');
         return;
       }
+
+      console.log('开始处理任务，任务ID:', taskId);
+
       await mytaskService.startTask(
-        taskId, 
-        currentRepairmanId, 
+        taskId,
+        currentRepairmanId,
         values.estimated_completion_time
       );
+
       setStartModalVisible(false);
+      startForm.resetFields();
+
+      message.success('任务开始处理成功！');
+
       // 刷新任务列表和统计数据
+      console.log('开始刷新任务列表...');
       await loadTasks();
+      console.log('任务列表刷新完成');
+
+      console.log('开始刷新统计数据...');
       await loadStats();
+      console.log('统计数据刷新完成');
+
     } catch (error) {
       console.error('开始任务失败:', error);
-      // 错误信息已经在service中显示
+      message.error('开始任务失败: ' + error.message);
+      // 错误时不关闭模态框，让用户可以重试
     }
   };
 
@@ -256,18 +325,37 @@ const MyTask = () => {
         message.error('任务ID不存在');
         return;
       }
-      await mytaskService.completeTask(
+
+      console.log('开始完成任务，任务ID:', taskId, '备注:', values.notes);
+
+      // 调用完成任务API
+      const result = await mytaskService.completeTask(
         taskId,
         currentRepairmanId,
         values.notes
       );
+
+      console.log('完成任务API返回结果:', result);
+
+      // 关闭模态框
       setCompleteModalVisible(false);
+      completeForm.resetFields();
+
+      message.success('任务已完成！');
+
       // 刷新任务列表和统计数据
+      console.log('开始刷新任务列表...');
       await loadTasks();
+      console.log('任务列表刷新完成');
+
+      console.log('开始刷新统计数据...');
       await loadStats();
+      console.log('统计数据刷新完成');
+
     } catch (error) {
       console.error('完成任务失败:', error);
-      // 错误信息已经在service中显示
+      message.error('完成任务失败: ' + error.message);
+      // 错误时不关闭模态框，让用户可以重试
     }
   };
 
@@ -290,7 +378,10 @@ const MyTask = () => {
   // 初始化加载数据
   useEffect(() => {
     if (currentRepairmanId) {
-      console.log('开始加载任务，维修工ID:', currentRepairmanId);
+      console.log('========================================');
+      console.log('维修工端 - 组件初始化');
+      console.log('维修工ID:', currentRepairmanId);
+      console.log('========================================');
       loadTasks();
       loadStats();
     } else {
@@ -298,6 +389,25 @@ const MyTask = () => {
       message.warning('无法获取用户信息，请重新登录');
     }
   }, []);
+
+  // ⚠️ 重要：添加轮询刷新机制，每10秒自动刷新统计数据
+  useEffect(() => {
+    if (!currentRepairmanId) return;
+
+    const interval = setInterval(() => {
+      console.log('========================================');
+      console.log('维修工端 - 轮询刷新统计数据（10秒）');
+      console.log('当前时间:', new Date().toLocaleString());
+      console.log('维修工ID:', currentRepairmanId);
+      console.log('========================================');
+      loadStats();
+    }, 10000); // 10秒刷新一次
+
+    return () => {
+      console.log('维修工端 - 清除轮询定时器');
+      clearInterval(interval);
+    };
+  }, [currentRepairmanId]);
 
   // 表格列定义
   const columns = [
@@ -340,12 +450,13 @@ const MyTask = () => {
       key: 'status',
       width: 100,
       render: (status, record) => {
-        // 安全获取状态信息，避免工具函数未定义或抛错导致整行渲染失败
-        let statusInfo = { label: status || '未知', color: 'default' };
+        // 优先使用映射后的前端状态，如果没有则使用原始状态再映射一次
+        const displayStatus = status || record.status || record.originalStatus;
+        let statusInfo = { label: displayStatus || '未知', color: 'default' };
         let isOverdue = false;
         try {
           if (mytaskUtils && typeof mytaskUtils.getStatusInfo === 'function') {
-            statusInfo = mytaskUtils.getStatusInfo(status) || statusInfo;
+            statusInfo = mytaskUtils.getStatusInfo(displayStatus) || statusInfo;
           }
           if (mytaskUtils && typeof mytaskUtils.isTaskOverdue === 'function') {
             isOverdue = !!mytaskUtils.isTaskOverdue(record);
@@ -353,7 +464,7 @@ const MyTask = () => {
         } catch (e) {
           console.error('渲染状态信息出错:', e, { status, record });
         }
-        
+
         return (
           <Space direction="vertical" size="small">
             <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
@@ -486,8 +597,22 @@ const MyTask = () => {
   return (
     <div
       style={{ padding: 24, background: '#ffffffff'}}>
-      <h2>我的任务</h2>
-      
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2>我的任务</h2>
+        <Button
+          type="primary"
+          icon={<SearchOutlined />}
+          onClick={() => {
+            console.log('手动刷新任务列表...');
+            loadTasks();
+            loadStats();
+          }}
+          loading={loading}
+        >
+          刷新数据
+        </Button>
+      </div>
+
       {/* 统计卡片 */}
       {stats && (
         <Card style={{ marginBottom: 16 }}>
@@ -508,9 +633,9 @@ const MyTask = () => {
               <Statistic title="已完成" value={stats.completed} valueStyle={{ color: '#52c41a' }} />
             </Col>
             <Col span={4}>
-              <Statistic 
-                title="平均评分" 
-                value={stats.averageRating} 
+              <Statistic
+                title="平均评分"
+                value={stats.averageRating}
                 prefix={<StarOutlined />}
                 valueStyle={{ color: '#fadb14' }}
               />
@@ -857,18 +982,47 @@ const MyTask = () => {
             </Descriptions.Item>
             {selectedTask.images && selectedTask.images.length > 0 && (
               <Descriptions.Item label="报修图片" span={2}>
-                <Image.PreviewGroup>
-                  {selectedTask.images.map((img, index) => (
-                    <Image
-                      key={index}
-                      width={100}
-                      src={img}
-                      placeholder={
-                        <div style={{ width: 100, height: 100, background: '#f5f5f5' }} />
-                      }
-                    />
-                  ))}
-                </Image.PreviewGroup>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {selectedTask.images.map((img, index) => {
+                    // 处理图片URL
+                    let imageUrl = img;
+                    if (typeof img === 'object') {
+                      imageUrl = img.imageUrl || img.url || img;
+                    }
+                    // 确保URL完整
+                    if (imageUrl && !imageUrl.startsWith('http')) {
+                      imageUrl = `http://localhost:8080${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+                    }
+                    console.log('图片URL:', imageUrl, '原始图片:', img);
+                    return (
+                      <Image
+                        key={index}
+                        width={100}
+                        height={75}
+                        src={imageUrl}
+                        style={{
+                          borderRadius: 6,
+                          objectFit: 'cover',
+                          border: '1px solid #d9d9d9',
+                          cursor: 'pointer',
+                        }}
+                        placeholder={
+                          <div style={{
+                            width: 100,
+                            height: 75,
+                            background: '#f5f5f5',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: 6,
+                          }}>
+                            加载中...
+                          </div>
+                        }
+                      />
+                    );
+                  })}
+                </div>
               </Descriptions.Item>
             )}
             {selectedTask.rating && (

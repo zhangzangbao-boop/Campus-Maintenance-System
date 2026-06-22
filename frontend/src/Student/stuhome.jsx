@@ -211,14 +211,13 @@ const Home = () => {
             margin: "76px 20px 20px 20px",
             padding: 0,
             background: "#FFFFFF",
-            minHeight: "calc(100vh - 96px)",
+            overflow: "auto",
           }}
         >
           <div style={{
             background: "#F8FAFC",
             borderRadius: "8px",
             padding: "20px",
-            minHeight: "calc(100vh - 136px)",
           }}>
             {currentMenu === "my-repairs" && (
               <MyRepairs

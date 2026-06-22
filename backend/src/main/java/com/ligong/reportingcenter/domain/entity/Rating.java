@@ -33,11 +33,11 @@ public class Rating {
     private RepairTicket ticket;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "student_number", nullable = false) // 修改外键列名与数据库一致
+    @JoinColumn(name = "student_number", referencedColumnName = "user_number", nullable = false) // 添加 referencedColumnName 确保正确关联
     private User student;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "repairman_id", nullable = false) // 修改外键列名与数据库一致
+    @JoinColumn(name = "repairman_id", referencedColumnName = "user_number", nullable = false) // 添加 referencedColumnName 确保正确关联
     private User staff;
 
     @Min(1)

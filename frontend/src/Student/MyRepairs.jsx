@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Table,
   Tag,
@@ -27,6 +27,7 @@ import {
   CheckCircleOutlined,
   StarOutlined,
   SearchOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { repairUtils, repairService } from "../Services/repairService";
 
@@ -71,6 +72,7 @@ const MyRepairs = ({ onRefresh }) => {
     status: "all",
     category: "all",
     priority: "all",
+    keyword: "",
   });
 
   // 新增：评价模态框状态
@@ -82,42 +84,76 @@ const MyRepairs = ({ onRefresh }) => {
 
   // 分类选项配置 - 使用 repairService 中的变量名
   const categoryOptions = [
-    { value: "waterAndElectricity", label: "水电维修" },
-    { value: "networkIssues", label: "网络故障" },
-    { value: "furnitureRepair", label: "家具维修" },
-    { value: "applianceIssues", label: "电器故障" },
-    { value: "publicFacilities", label: "公共设施" },
+    { value: "waterAndElectricity", label: "水电维修", backendValue: "水电维修" },
+    { value: "networkIssues", label: "网络故障", backendValue: "网络故障" },
+    { value: "furnitureRepair", label: "家具维修", backendValue: "家具维修" },
+    { value: "applianceIssues", label: "电器故障", backendValue: "电器故障" },
+    { value: "publicFacilities", label: "公共设施", backendValue: "公共设施" },
   ];
 
-  // 加载我的报修记录
-  const fetchMyRepairs = async () => {
+  // 分类值映射：前端值 -> 后端值
+  const categoryValueMap = {
+    "waterAndElectricity": "水电维修",
+    "networkIssues": "网络故障",
+    "furnitureRepair": "家具维修",
+    "applianceIssues": "电器故障",
+    "publicFacilities": "公共设施",
+  };
+
+  // 紧急程度值映射：前端值 -> 后端值
+  const priorityValueMap = {
+    "low": "LOW",
+    "medium": "MEDIUM",
+    "high": "HIGH",
+  };
+
+  // 加载我的报修记录 - 使用 useCallback 包装，避免重复创建
+  const fetchMyRepairs = useCallback(async () => {
     setLoading(true);
     try {
+      console.log('========================================');
       console.log('开始获取我的报修订单...');
+      console.log('当前时间:', new Date().toLocaleString());
+      console.log('========================================');
+
       const result = await repairService.getMyRepairOrders();
-      console.log('获取到的订单数据:', result);
+      console.log('获取到的订单结果:', result);
+      console.log('订单数据:', result.data);
+      console.log('订单数量:', result.data?.length || 0);
+
+      // 检查是否有数据
+      if (!result.data || result.data.length === 0) {
+        console.warn('警告：没有获取到任何报修订单数据');
+        console.warn('可能原因：');
+        console.warn('1. 后端数据库中没有该学生的报修单');
+        console.warn('2. Token无效或已过期');
+        console.warn('3. 后端服务未正常运行');
+        setRepairOrders([]);
+        setFilteredOrders([]);
+        message.warning('暂无报修记录');
+        return;
+      }
+
       // 映射后端字段名到前端字段名：ticketId -> id, categoryName -> category, locationText -> location
-      const mappedData = (result.data || []).map(order => {
+      const mappedData = result.data.map((order, index) => {
+        console.log(`处理订单 ${index + 1}:`, order);
+
         // 确保title和description正确区分
         const description = order.description || '';
         // 如果后端返回的title和description相同，说明后端没有正确存储title，使用位置信息生成标题
         const rawTitle = order.title || '';
-        const title = (rawTitle && rawTitle !== description) 
-          ? rawTitle 
+        const title = (rawTitle && rawTitle !== description)
+          ? rawTitle
           : (order.locationText ? `报修-${order.locationText}` : '报修单');
-        
-        console.log('处理订单标题:', {
-          orderId: order.ticketId || order.id,
-          rawTitle: order.title,
-          description: description,
-          locationText: order.locationText,
-          titleEqualsDescription: rawTitle === description,
-          generatedTitle: title
-        });
-        
-        return {
+
+        const backendStatus = order.status;
+        const mappedStatus = mapStatusToFrontend(backendStatus);
+        console.log(`订单ID ${order.ticketId || order.id}: 后端状态="${backendStatus}" -> 前端状态="${mappedStatus}"`);
+
+        const mappedOrder = {
           ...order,
           id: order.ticketId || order.id, // 兼容两种字段名
+          ticketId: order.ticketId || order.id,
           category: order.categoryName || order.category,
           location: order.locationText || order.location,
           description: description, // 确保description字段存在且完整
@@ -126,21 +162,51 @@ const MyRepairs = ({ onRefresh }) => {
           completed_at: order.completedAt || order.completed_at,
           repairmanId: order.staffId || order.repairmanId || null,
           repairmanName: order.staffName || null, // 添加维修人员名称
-          status: mapStatusToFrontend(order.status), // 映射状态
+          status: mappedStatus, // 映射状态
+          originalStatus: backendStatus, // 保存原始状态
           title: title, // 确保标题正确生成，与description区分
         };
+
+        console.log(`映射后的订单 ${index + 1}:`, mappedOrder);
+        return mappedOrder;
       });
-      
-      console.log('映射后的报修数据:', mappedData);
+
+      console.log('========================================');
+      console.log('映射后的报修数据汇总:', mappedData);
+      console.log('总数:', mappedData.length);
+
+      const statusCounts = {
+        pending: mappedData.filter(o => o.status === 'pending').length,
+        processing: mappedData.filter(o => o.status === 'processing').length,
+        completed: mappedData.filter(o => o.status === 'completed').length,
+        to_be_evaluated: mappedData.filter(o => o.status === 'to_be_evaluated').length,
+        closed: mappedData.filter(o => o.status === 'closed').length,
+        rejected: mappedData.filter(o => o.status === 'rejected').length,
+      };
+      console.log('各状态数量:', statusCounts);
+      console.log('========================================');
+
       setRepairOrders(mappedData);
       setFilteredOrders(mappedData);
+
+      message.success(`成功加载 ${mappedData.length} 条报修记录`);
+
     } catch (error) {
-      console.error("获取报修记录失败:", error);
-      message.error("获取报修记录失败");
+      console.error('========================================');
+      console.error('获取报修记录失败:', error);
+      console.error('错误消息:', error.message);
+      console.error('错误堆栈:', error.stack);
+      console.error('========================================');
+
+      message.error(`获取报修记录失败: ${error.message}`);
+      setRepairOrders([]);
+      setFilteredOrders([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []); // useCallback 的依赖数组为空，表示函数不依赖任何外部变量
+
+  // 搜索我的报修记录
 
   // 搜索我的报修记录
   const searchMyRepairs = async (keyword = "") => {
@@ -163,43 +229,66 @@ const MyRepairs = ({ onRefresh }) => {
 
   // 应用筛选
   const applyFilters = () => {
-    let filtered = repairOrders;
+    let filtered = [...repairOrders];
 
-    // 状态筛选
+    // 状态筛选 - 直接匹配前端状态值
     if (filters.status !== "all") {
       filtered = filtered.filter((order) => order.status === filters.status);
     }
 
-    // 分类筛选
+    // 分类筛选 - 前端值映射到后端值
     if (filters.category !== "all") {
+      const backendCategory = categoryValueMap[filters.category];
       filtered = filtered.filter(
-        (order) => order.category === filters.category
+        (order) => order.category === backendCategory || order.category === filters.category
       );
     }
 
-    // 紧急程度筛选
+    // 紧急程度筛选 - 前端值映射到后端值
     if (filters.priority !== "all") {
+      const backendPriority = priorityValueMap[filters.priority];
       filtered = filtered.filter(
-        (order) => order.priority === filters.priority
+        (order) => order.priority === backendPriority || order.priority === filters.priority || order.priority?.toLowerCase() === filters.priority
       );
     }
 
+    // 关键字搜索
+    if (filters.keyword && filters.keyword.trim()) {
+      const keyword = filters.keyword.trim().toLowerCase();
+      filtered = filtered.filter((order) => {
+        const title = (order.title || '').toLowerCase();
+        const description = (order.description || '').toLowerCase();
+        const location = (order.location || '').toLowerCase();
+        return title.includes(keyword) || description.includes(keyword) || location.includes(keyword);
+      });
+    }
+
+    console.log('筛选结果:', { filters, total: repairOrders.length, filtered: filtered.length });
     setFilteredOrders(filtered);
   };
 
   useEffect(() => {
+    console.log('========================================');
+    console.log('组件初始化，开始加载报修数据...');
+    console.log('========================================');
     fetchMyRepairs();
-  }, []);
+  }, [fetchMyRepairs]); // 依赖 fetchMyRepairs
 
   // 添加轮询刷新，每10秒刷新一次数据，确保分配和完成情况同步
   useEffect(() => {
     const interval = setInterval(() => {
+      console.log('========================================');
       console.log('轮询刷新订单状态...');
+      console.log('当前时间:', new Date().toLocaleString());
+      console.log('========================================');
       fetchMyRepairs();
     }, 10000); // 10秒刷新一次，更快地同步状态
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      console.log('清除轮询定时器');
+      clearInterval(interval);
+    };
+  }, [fetchMyRepairs]); // 依赖 fetchMyRepairs
 
   useEffect(() => {
     applyFilters();
@@ -219,8 +308,8 @@ const MyRepairs = ({ onRefresh }) => {
       status: "all",
       category: "all",
       priority: "all",
+      keyword: "",
     });
-    fetchMyRepairs(); // 重新加载所有数据
   };
 
   // 打开详情模态框
@@ -237,74 +326,16 @@ const MyRepairs = ({ onRefresh }) => {
         return;
       }
 
+      console.log('查看工单详情，工单ID:', orderId);
+
+      // repairService 已经完成了字段映射，直接使用返回的数据
       const orderDetail = await repairService.getRepairOrderById(orderId);
+      console.log('获取到的订单详情（已映射）:', orderDetail);
 
-      // 映射后端字段名到前端字段名，并处理图片数据
-      console.log('获取到的订单详情:', orderDetail);
-      
-      const orderWithImages = {
-        ...orderDetail,
-        id: orderDetail.ticketId || orderDetail.id,
-        category: orderDetail.categoryName || orderDetail.category,
-        location: orderDetail.locationText || orderDetail.location,
-        created_at: orderDetail.createdAt || orderDetail.created_at,
-        assigned_at: orderDetail.assignedAt || orderDetail.assigned_at,
-        completed_at: orderDetail.completedAt || orderDetail.completed_at,
-        rejection_reason: orderDetail.rejectionReason || orderDetail.rejection_reason,
-        studentID: orderDetail.studentId || orderDetail.studentID,
-        studentName: orderDetail.studentName || orderDetail.studentName,
-        repairmanId: orderDetail.staffId || orderDetail.repairmanId || null,
-        repairmanName: orderDetail.staffName || orderDetail.repairmanName || null, // 确保维修人员名称正确映射
-        status: mapStatusToFrontend(orderDetail.status), // 映射状态
-        // 如果后端返回的title和description相同，说明后端没有正确存储title，使用位置信息生成标题
-        title: (orderDetail.title && orderDetail.title !== orderDetail.description) 
-          ? orderDetail.title 
-          : (orderDetail.locationText ? `报修-${orderDetail.locationText}` : '报修单'),
-        // 添加评价相关字段
-        rating: orderDetail.rating?.score || orderDetail.rating || null,
-        feedback: orderDetail.rating?.comment || orderDetail.feedback || null,
-        // 处理图片：如果是对象数组，提取 imageUrl；如果是字符串数组，直接使用
-        images: (() => {
-          console.log('原始图片数据:', orderDetail.images);
-          const processedImages = (orderDetail.images || []).map((img, idx) => {
-            console.log(`处理第 ${idx} 张图片:`, img, '类型:', typeof img);
-            if (typeof img === 'string') {
-              // 如果是字符串，检查是否是完整URL，如果不是，添加base URL
-              const fullUrl = img.startsWith('http') ? img : `http://localhost:8080${img.startsWith('/') ? '' : '/'}${img}`;
-              console.log(`图片 ${idx} (字符串):`, img, '->', fullUrl);
-              return fullUrl;
-            }
-            // 如果是对象，提取 imageUrl
-            const imageUrl = img.imageUrl || img.url || (typeof img === 'object' ? JSON.stringify(img) : img);
-            console.log(`图片 ${idx} (对象):`, img, '提取的URL:', imageUrl);
-            // 确保URL完整
-            if (!imageUrl) {
-              console.warn(`图片 ${idx} 没有有效的URL`);
-              return null;
-            }
-            const fullUrl = typeof imageUrl === 'string' && imageUrl.startsWith('http') ? imageUrl : `http://localhost:8080${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
-            console.log(`图片 ${idx} 最终URL:`, imageUrl, '->', fullUrl);
-            return fullUrl;
-          }).filter(Boolean); // 过滤掉null值
-          console.log('处理后的图片数组:', processedImages);
-          return processedImages;
-        })(),
-      };
-      
-      console.log('处理后的订单详情:', orderWithImages);
-      console.log('维修人员信息:', {
-        repairmanId: orderWithImages.repairmanId,
-        repairmanName: orderWithImages.repairmanName,
-        staffId: orderDetail.staffId,
-        staffName: orderDetail.staffName
-      });
-      
-      console.log('处理后的订单详情:', orderWithImages);
-
-      setSelectedOrder(orderWithImages);
+      setSelectedOrder(orderDetail);
     } catch (error) {
       console.error("获取工单详情失败:", error);
-      message.error("获取详情失败");
+      message.error("获取详情失败: " + error.message);
     } finally {
       setDetailLoading(false);
     }
@@ -416,23 +447,139 @@ const MyRepairs = ({ onRefresh }) => {
     }
   };
 
-  // 统计信息
+  // 统计信息 - 基于实际的repairOrders数据动态计算，添加调试日志
   const getStats = () => {
-    const total = repairOrders.length;
-    const pending = repairOrders.filter(
-      (order) => order.status === "pending"
-    ).length;
-    const processing = repairOrders.filter(
-      (order) => order.status === "processing"
-    ).length;
-    const completed = repairOrders.filter(
-      (order) => order.status === "completed"
-    ).length;
-    const toBeEvaluated = repairOrders.filter(
-      (order) => order.status === "to_be_evaluated"
-    ).length;
+    console.log('========================================');
+    console.log('学生端统计信息计算开始...');
+    console.log('当前报修订单数组:', repairOrders);
+    console.log('报修订单数量:', repairOrders.length);
 
-    return { total, pending, processing, completed, toBeEvaluated };
+    if (!repairOrders || repairOrders.length === 0) {
+      console.warn('警告：报修订单数组为空，返回默认统计数据');
+      console.log('========================================');
+      return {
+        total: 0,
+        pending: 0,
+        processing: 0,
+        completed: 0,
+        toBeEvaluated: 0,
+        rejected: 0
+      };
+    }
+
+    const total = repairOrders.length;
+
+    console.log('========================================');
+    console.log('开始统计各状态订单数量...');
+    console.log('订单状态详情:');
+    repairOrders.forEach((order, index) => {
+      console.log(`订单 ${index + 1}: ID=${order.id}, 状态="${order.status}", 原始状态="${order.originalStatus}", 标题="${order.title}"`);
+    });
+    console.log('========================================');
+
+    // 统计各状态数量 - 从学生视角正确统计
+    // 学生端视角：
+    // - pending（待受理）= WAITING_ACCEPT（刚提交，等待维修工接单）
+    // - processing（处理中）= IN_PROGRESS（维修工正在处理）
+    // - toBeEvaluated（待评价）= RESOLVED（维修完成，需要学生评价）或 WAITING_FEEDBACK（等待评价）
+    // - completed（已完成）= FEEDBACKED（已评价）或 CLOSED（已关闭）
+    // - rejected（已驳回）= REJECTED
+
+    console.log('========================================');
+    console.log('开始分类统计（学生视角）...');
+    console.log('========================================');
+
+    // 待受理：WAITING_ACCEPT 状态
+    const pendingOrders = repairOrders.filter(order => {
+      const originalStatus = order.originalStatus || order.status;
+      // 检查原始后端状态是否为 WAITING_ACCEPT
+      const isPending = originalStatus === 'WAITING_ACCEPT' || order.status === 'pending';
+      console.log(`订单 ${order.id}: 原始状态="${originalStatus}", 是否待受理=${isPending}`);
+      return isPending;
+    });
+    const pending = pendingOrders.length;
+    console.log('待受理订单 (WAITING_ACCEPT):', pending, '条');
+    if (pendingOrders.length > 0) {
+      console.log('待受理订单详情:', pendingOrders.map(o => ({ id: o.id, title: o.title, originalStatus: o.originalStatus })));
+    }
+
+    // 处理中：IN_PROGRESS 状态
+    const processingOrders = repairOrders.filter(order => {
+      const originalStatus = order.originalStatus || order.status;
+      const isProcessing = originalStatus === 'IN_PROGRESS' || order.status === 'processing';
+      console.log(`订单 ${order.id}: 原始状态="${originalStatus}", 是否处理中=${isProcessing}`);
+      return isProcessing;
+    });
+    const processing = processingOrders.length;
+    console.log('处理中订单 (IN_PROGRESS):', processing, '条');
+    if (processingOrders.length > 0) {
+      console.log('处理中订单详情:', processingOrders.map(o => ({ id: o.id, title: o.title, originalStatus: o.originalStatus })));
+    }
+
+    // 学生端"待评价"：RESOLVED（维修完成）或 WAITING_FEEDBACK（等待评价）状态
+    // 注意：从学生视角，RESOLVED 就是"维修工已完成，我需要去评价"
+    const toBeEvaluatedOrders = repairOrders.filter(order => {
+      const originalStatus = order.originalStatus || order.status;
+      // RESOLVED 状态：维修工已完成，等待学生评价
+      // WAITING_FEEDBACK 状态：系统标记为等待评价
+      const isToBeEvaluated = originalStatus === 'RESOLVED' || originalStatus === 'WAITING_FEEDBACK' || order.status === 'to_be_evaluated';
+      console.log(`订单 ${order.id}: 原始状态="${originalStatus}", 是否待评价=${isToBeEvaluated}`);
+      return isToBeEvaluated;
+    });
+    const toBeEvaluated = toBeEvaluatedOrders.length;
+    console.log('待评价订单 (RESOLVED 或 WAITING_FEEDBACK):', toBeEvaluated, '条');
+    if (toBeEvaluatedOrders.length > 0) {
+      console.log('待评价订单详情:', toBeEvaluatedOrders.map(o => ({
+        id: o.id,
+        title: o.title,
+        originalStatus: o.originalStatus,
+        status: o.status
+      })));
+    }
+
+    // 学生端"已完成"：FEEDBACKED（已评价）或 CLOSED（已关闭）状态
+    const completedOrders = repairOrders.filter(order => {
+      const originalStatus = order.originalStatus || order.status;
+      // 只有已评价或已关闭的才算"已完成"
+      const isCompleted = originalStatus === 'FEEDBACKED' || originalStatus === 'CLOSED' || order.status === 'closed';
+      console.log(`订单 ${order.id}: 原始状态="${originalStatus}", 是否已完成=${isCompleted}`);
+      return isCompleted;
+    });
+    const completed = completedOrders.length;
+    console.log('已完成订单 (FEEDBACKED 或 CLOSED):', completed, '条');
+    if (completedOrders.length > 0) {
+      console.log('已完成订单详情:', completedOrders.map(o => ({
+        id: o.id,
+        title: o.title,
+        originalStatus: o.originalStatus,
+        rating: o.rating
+      })));
+    }
+
+    // 已驳回：REJECTED 状态
+    const rejectedOrders = repairOrders.filter(order => {
+      const originalStatus = order.originalStatus || order.status;
+      const isRejected = originalStatus === 'REJECTED' || order.status === 'rejected';
+      console.log(`订单 ${order.id}: 原始状态="${originalStatus}", 是否已驳回=${isRejected}`);
+      return isRejected;
+    });
+    const rejected = rejectedOrders.length;
+    console.log('已驳回订单 (REJECTED):', rejected, '条');
+    if (rejectedOrders.length > 0) {
+      console.log('已驳回订单详情:', rejectedOrders.map(o => ({ id: o.id, title: o.title, originalStatus: o.originalStatus })));
+    }
+
+    const stats = { total, pending, processing, completed, toBeEvaluated, rejected };
+
+    console.log('========================================');
+    console.log('学生端统计结果汇总:', stats);
+    console.log(`验证: total(${total}) = pending(${pending}) + processing(${processing}) + toBeEvaluated(${toBeEvaluated}) + completed(${completed}) + rejected(${rejected})`);
+    const verificationSum = pending + processing + toBeEvaluated + completed + rejected;
+    console.log(`验证计算: ${total} = ${verificationSum}`);
+    console.log(`验证结果: ${total === verificationSum ? '✓ 正确' : '✗ 错误（差额=' + (total - verificationSum) + '）'}`);
+    console.log('========================================');
+
+    return stats;
   };
 
   const stats = getStats();
@@ -551,14 +698,37 @@ const MyRepairs = ({ onRefresh }) => {
 
   return (
     <div>
-      <h2 style={{
-        fontSize: "16px",
-        fontWeight: "600",
-        color: "#1f1f1f",
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
         marginBottom: "16px",
         paddingBottom: "12px",
         borderBottom: "1px solid #e8e8e8",
-      }}>我的报修</h2>
+      }}>
+        <h2 style={{
+          fontSize: "16px",
+          fontWeight: "600",
+          color: "#1f1f1f",
+          margin: 0,
+        }}>我的报修</h2>
+
+        <Button
+          type="primary"
+          icon={<ReloadOutlined />}
+          onClick={() => {
+            console.log('手动刷新报修数据...');
+            fetchMyRepairs();
+          }}
+          loading={loading}
+          style={{
+            backgroundColor: "#0F52BA",
+            borderColor: "#0F52BA",
+          }}
+        >
+          刷新数据
+        </Button>
+      </div>
 
       {/* 统计信息 */}
       <Row
@@ -625,12 +795,12 @@ const MyRepairs = ({ onRefresh }) => {
         title={<span style={{ fontSize: "15px", fontWeight: "600", color: "#1f1f1f" }}>筛选条件</span>}
         style={{ marginBottom: "16px", borderRadius: "8px", border: "none", background: "#FFFFFF" }}
       >
-        <Space size="middle">
-          <div>
-            <span style={{ marginRight: 8, fontSize: "15px", fontWeight: "500", color: "#5c5c5c" }}>状态：</span>
+        <Space size="middle" wrap>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "15px", fontWeight: "500", color: "#5c5c5c", minWidth: "50px" }}>状态：</span>
             <Select
               value={filters.status}
-              style={{ width: 120 }}
+              style={{ width: 140 }}
               onChange={(value) => handleFilterChange("status", value)}
             >
               <Option value="all">全部状态</Option>
@@ -643,11 +813,11 @@ const MyRepairs = ({ onRefresh }) => {
             </Select>
           </div>
 
-          <div>
-            <span style={{ marginRight: 8, fontSize: "15px", fontWeight: "500", color: "#5c5c5c" }}>分类：</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "15px", fontWeight: "500", color: "#5c5c5c", minWidth: "50px" }}>分类：</span>
             <Select
               value={filters.category}
-              style={{ width: 120 }}
+              style={{ width: 140 }}
               onChange={(value) => handleFilterChange("category", value)}
             >
               <Option value="all">全部分类</Option>
@@ -659,11 +829,11 @@ const MyRepairs = ({ onRefresh }) => {
             </Select>
           </div>
 
-          <div>
-            <span style={{ marginRight: 8, fontSize: "15px", fontWeight: "500", color: "#5c5c5c" }}>紧急程度：</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "15px", fontWeight: "500", color: "#5c5c5c", minWidth: "70px" }}>紧急程度：</span>
             <Select
               value={filters.priority}
-              style={{ width: 120 }}
+              style={{ width: 140 }}
               onChange={(value) => handleFilterChange("priority", value)}
             >
               <Option value="all">全部</Option>
@@ -672,31 +842,28 @@ const MyRepairs = ({ onRefresh }) => {
               <Option value="high">高</Option>
             </Select>
           </div>
-          <div>
-            <Space.Compact style={{ width: 280 }}>
-              <Input
-                placeholder="按标题/描述/位置搜索"
-                allowClear
-                onChange={(e) => {
-                  if (!e.target.value) {
-                    applyFilters();
-                  }
-                }}
-              />
-              <Button
-                type="primary"
-                icon={<SearchOutlined />}
-                onClick={(value) => {
-                  const searchInput = document.querySelector('.ant-input');
-                  if (searchInput) {
-                    searchMyRepairs(searchInput.value);
-                  }
-                }}
-              >
-                搜索
-              </Button>
-            </Space.Compact>
+
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <Input
+              placeholder="按标题/描述/位置搜索"
+              allowClear
+              style={{ width: 200, height: 36 }}
+              onChange={(e) => {
+                setFilters(prev => ({ ...prev, keyword: e.target.value }));
+              }}
+            />
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              style={{ height: 36, marginLeft: "-1px" }}
+              onClick={() => {
+                applyFilters();
+              }}
+            >
+              搜索
+            </Button>
           </div>
+
           <Button icon={<FilterOutlined />} onClick={handleResetFilters}>
             重置筛选
           </Button>
@@ -863,58 +1030,51 @@ const MyRepairs = ({ onRefresh }) => {
             {/* 新增：现场照片展示 */}
             {selectedOrder.images && selectedOrder.images.length > 0 ? (
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ marginBottom: 16 }}>现场照片</h4>
-                <Image.PreviewGroup>
-                  <Space wrap>
-                    {selectedOrder.images.map((image, index) => {
-                      let imageUrl = typeof image === 'string' ? image : (image.imageUrl || image.url || image);
-                      // 确保URL完整
-                      if (imageUrl && !imageUrl.startsWith('http')) {
-                        imageUrl = `http://localhost:8080${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
-                      }
-                      console.log('图片URL:', imageUrl, '原始图片:', image);
-                      return (
-                        <Image
-                          key={index}
-                          width={120}
-                          height={90}
-                          src={imageUrl}
-                          fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBS1pFSFpSg0k3RtVkww1JXSnlRYgqpJQZJFdQqg9LcjQ0PSMZxYaCAhjrH4GBs5F2QW6QAlGx6wMDMwT6ZgUJ5AcFnQcC9nUgUjGwjCx3CgPDBQcB9kShuGkYGyI1yspDg8T8jUFJgYJTA0MDAvYkDEuSykAjrvgODBbsCxKJEuAMYv7EUpxkbQBx8gfB4WbE0C4gdQyGHQf0"
-                          style={{
-                            borderRadius: 6,
-                            objectFit: "cover",
-                            border: "1px solid #d9d9d9",
-                            cursor: "pointer",
-                          }}
-                          placeholder={
-                            <div
-                              style={{
-                                width: 120,
-                                height: 90,
-                                background: "#f5f5f5",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                borderRadius: 6,
-                              }}
-                            >
-                              加载中...
-                            </div>
-                          }
-                          onError={(e) => {
-                            console.error('图片加载失败:', imageUrl, e);
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      );
-                    })}
-                  </Space>
-                </Image.PreviewGroup>
+                <h4 style={{ marginBottom: 16, fontSize: "15px", fontWeight: "600", color: "#1f1f1f" }}>现场照片</h4>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {selectedOrder.images.map((image, index) => {
+                    let imageUrl = typeof image === 'string' ? image : (image.imageUrl || image.url || image);
+                    // 确保URL完整
+                    if (imageUrl && !imageUrl.startsWith('http')) {
+                      imageUrl = `http://localhost:8080${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+                    }
+                    console.log('图片URL:', imageUrl, '原始图片:', image);
+                    return (
+                      <Image
+                        key={index}
+                        width={120}
+                        height={90}
+                        src={imageUrl}
+                        style={{
+                          borderRadius: 6,
+                          objectFit: "cover",
+                          border: "1px solid #d9d9d9",
+                          cursor: "pointer",
+                        }}
+                        placeholder={
+                          <div
+                            style={{
+                              width: 120,
+                              height: 90,
+                              background: "#f5f5f5",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: 6,
+                            }}
+                          >
+                            加载中...
+                          </div>
+                        }
+                      />
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ marginBottom: 16 }}>现场照片</h4>
-                <div style={{ color: '#999', textAlign: 'center', padding: '20px' }}>暂无照片</div>
+                <h4 style={{ marginBottom: 16, fontSize: "15px", fontWeight: "600", color: "#1f1f1f" }}>现场照片</h4>
+                <div style={{ color: '#8c8c8c', textAlign: 'center', padding: '20px', background: '#f8fafc', borderRadius: '6px' }}>暂无照片</div>
               </div>
             )}
 

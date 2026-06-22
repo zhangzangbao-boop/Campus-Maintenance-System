@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Table, Tag, Spin, Statistic, Alert, Button, Space, Popconfirm, message } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Row, Col, Card, Table, Tag, Spin, Statistic, Alert, Button, Space, Popconfirm, message, Descriptions } from 'antd';
 import { Pie, Column, Line } from '@ant-design/charts';
+import { ReloadOutlined, DatabaseOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { statisticsService } from './statisticsService';
 import { TASK_STATUS } from '../Worker/mytaskService';
 import { backupService } from './backupService';
@@ -13,16 +14,24 @@ const DataAnalysis = () => {
   const [monthlyData, setMonthlyData] = useState([]); // 新增：月度统计数据
   const [overallStats, setOverallStats] = useState({
     totalRepairs: 0,
-    avgProcessingTime: '0 天',
-    userSatisfaction: '0%'
+    avgProcessingTime: '暂无数据',
+    userSatisfaction: '暂无数据'
   });
   const [loading, setLoading] = useState(true);
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupList, setBackupList] = useState([]);
+  const [lastUpdateTime, setLastUpdateTime] = useState(null); // 新增：记录最后更新时间
 
-  const loadStatistics = async () => {
+  // 加载统计数据 - 使用 useCallback 包装
+  const loadStatistics = useCallback(async () => {
+    console.log('========================================');
+    console.log('管理员端数据统计 - 开始加载统计数据...');
+    console.log('当前时间:', new Date().toLocaleString());
+    console.log('========================================');
+
     setLoading(true);
-    
+    setLastUpdateTime(new Date());
+
     try {
       // 新增：获取月度统计数据
       const [categoryStats, locationStats, ratingStats, statusStats, monthlyStats, overallStatsData] = await Promise.all([
@@ -34,11 +43,15 @@ const DataAnalysis = () => {
         statisticsService.getOverallStats()
       ]);
 
+      console.log('========================================');
+      console.log('管理员端数据统计 - 所有数据加载完成');
       console.log('分类统计数据:', categoryStats);
       console.log('位置统计数据:', locationStats);
       console.log('评分统计数据:', ratingStats);
       console.log('状态统计数据:', statusStats);
-      console.log('月度统计数据:', monthlyStats); // 新增：调试信息
+      console.log('月度统计数据:', monthlyStats);
+      console.log('总体统计数据:', overallStatsData);
+      console.log('========================================');
 
       setCategoryData(categoryStats);
       setLocationData(locationStats);
@@ -46,12 +59,33 @@ const DataAnalysis = () => {
       setStatusData(statusStats);
       setMonthlyData(monthlyStats); // 设置月度统计数据
       setOverallStats(overallStatsData);
+
+      // 显示数据来源提示
+      const dataSourceInfo = `
+数据来源验证：
+- 总报修数：${overallStatsData.totalRepairs} 条（从数据库repair_order表汇总）
+- 报修分类：${categoryStats.length} 个分类（从数据库repair_order.category_key字段统计）
+- 位置统计：${locationStats.length} 个位置（从数据库repair_order.location字段统计）
+- 维修工评分：${ratingStats.length} 名维修工（从数据库repair_feedback表计算）
+- 工单状态：${statusStats.length} 种状态（从数据库repair_order.status字段统计）
+      `;
+      console.log(dataSourceInfo);
+
+      message.success('统计数据加载成功（数据来源：数据库实时查询）');
+
     } catch (error) {
-      console.error('加载统计数据失败:', error);
+      console.error('========================================');
+      console.error('管理员端数据统计 - 加载统计数据失败:', error);
+      console.error('错误消息:', error.message);
+      console.error('错误堆栈:', error.stack);
+      console.error('========================================');
+
+      message.error(`加载统计数据失败: ${error.message}`);
     } finally {
       setLoading(false);
+      console.log('管理员端数据统计 - 加载完成，loading 状态设置为 false');
     }
-  };
+  }, []);
 
   const loadBackups = async () => {
     setBackupLoading(true);
@@ -91,35 +125,121 @@ const DataAnalysis = () => {
   };
 
   const handleDelete = async (fileName) => {
-    if (!fileName) return;
+    if (!fileName) {
+      message.error('文件名不能为空');
+      return;
+    }
+
+    console.log('准备删除备份文件:', fileName);
     setBackupLoading(true);
+
     try {
+      console.log('调用删除备份API...');
       await backupService.remove(fileName);
+      console.log('删除成功，刷新备份列表...');
+
+      message.success('备份已删除');
+
+      // 刷新备份列表
       await loadBackups();
     } catch (error) {
       console.error('删除备份失败:', error);
+      message.error(`删除备份失败: ${error.message}`);
     } finally {
       setBackupLoading(false);
     }
   };
 
   useEffect(() => {
+    console.log('========================================');
+    console.log('管理员端数据统计 - 组件初始化');
+    console.log('========================================');
     loadStatistics();
     loadBackups();
-  }, []);
+  }, [loadStatistics]);
+
+  // 添加轮询刷新，每30秒刷新一次统计数据
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('========================================');
+      console.log('管理员端数据统计 - 轮询刷新（30秒）');
+      console.log('当前时间:', new Date().toLocaleString());
+      console.log('========================================');
+      loadStatistics();
+    }, 30000); // 30秒刷新一次
+
+    return () => {
+      console.log('管理员端数据统计 - 清除轮询定时器');
+      clearInterval(interval);
+    };
+  }, [loadStatistics]);
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
+      <div style={{
+        textAlign: 'center',
+        padding: '50px',
+        height: '100vh',
+        overflow: 'auto'
+      }}>
         <Spin size="large" />
         <p>正在加载统计数据...</p>
+        <p style={{ fontSize: '12px', color: '#666' }}>数据来源: 数据库实时查询</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '16px' }}>
-      <h2>数据统计与分析</h2>
+    <div style={{
+      padding: '16px',
+      width: '100%',
+      height: 'auto',
+      overflow: 'visible'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '16px'
+      }}>
+        <h2 style={{ margin: 0 }}>数据统计与分析</h2>
+
+        <Space size="middle">
+          {/* 显示最后更新时间 */}
+          {lastUpdateTime && (
+            <span style={{ fontSize: '12px', color: '#666' }}>
+              最后更新: {lastUpdateTime.toLocaleString()}
+            </span>
+          )}
+
+          <Button
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              console.log('管理员端数据统计 - 手动刷新数据');
+              loadStatistics();
+            }}
+            loading={loading}
+            style={{
+              backgroundColor: "#0F52BA",
+              borderColor: "#0F52BA",
+            }}
+          >
+            刷新数据
+          </Button>
+        </Space>
+      </div>
+
+      {/* 数据来源提示 */}
+      <Alert
+        message="数据来源说明"
+        description="所有统计数据均来自数据库实时查询，包括：总报修数（repair_order表）、报修分类占比（category_key字段）、位置统计（location字段）、维修工评分（repair_feedback表）、工单状态分布（status字段）。数据每30秒自动刷新一次。"
+        type="info"
+        icon={<DatabaseOutlined />}
+        showIcon
+        closable
+        style={{ marginBottom: '16px' }}
+      />
 
       {/* 备份与恢复 */}
       <Card
@@ -191,7 +311,11 @@ const DataAnalysis = () => {
             <Statistic
               value={overallStats.totalRepairs}
               valueStyle={{ color: '#1890ff', fontSize: '24px', fontWeight: 'bold' }}
+              suffix="条"
             />
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+              数据来源: repair_order表实时汇总
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={8}>
@@ -200,6 +324,12 @@ const DataAnalysis = () => {
               value={overallStats.avgProcessingTime}
               valueStyle={{ color: '#52c41a', fontSize: '24px', fontWeight: 'bold' }}
             />
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+              {overallStats.avgProcessingTime === '暂无数据' ?
+                '需要已完成工单数据' :
+                '基于已完成工单估算（建议后端提供实际计算）'
+              }
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={8}>
@@ -208,6 +338,12 @@ const DataAnalysis = () => {
               value={overallStats.userSatisfaction}
               valueStyle={{ color: '#fa541c', fontSize: '24px', fontWeight: 'bold' }}
             />
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+              {overallStats.userSatisfaction === '暂无数据' ?
+                '需要评价数据（repair_feedback表）' :
+                '基于维修工评分加权平均计算'
+              }
+            </div>
           </Card>
         </Col>
       </Row>

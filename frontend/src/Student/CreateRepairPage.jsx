@@ -107,11 +107,7 @@ const CreateRepairPage = ({ currentUser, onSubmitSuccess }) => {
   return (
     <div
       style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "flex-start",
-        height: "100%",
-        overflow: "hidden",
+        padding: "20px 0",
       }}
     >
       <Card
@@ -119,10 +115,8 @@ const CreateRepairPage = ({ currentUser, onSubmitSuccess }) => {
         style={{
           width: "100%",
           maxWidth: "800px",
+          margin: "0 auto",
           boxShadow: "0 2px 8px rgba(15, 82, 186, 0.06)",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
           borderRadius: "8px",
           border: "none",
           background: "#FFFFFF",
@@ -133,8 +127,6 @@ const CreateRepairPage = ({ currentUser, onSubmitSuccess }) => {
           padding: "16px 20px",
         }}
         styles={{ body: {
-          flex: 1,
-          overflowY: "auto",
           padding: "20px",
           background: "#F8FAFC",
         }}}

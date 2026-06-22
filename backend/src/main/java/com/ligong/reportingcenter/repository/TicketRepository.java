@@ -49,34 +49,41 @@ public interface TicketRepository extends JpaRepository<RepairTicket, Long> {
     @Query("SELECT t.locationText, COUNT(t.id) FROM RepairTicket t WHERE (t.deleted IS NULL OR t.deleted = false) GROUP BY t.locationText ORDER BY COUNT(t.id) DESC")
     List<Object[]> findLocationStats();
 
-    // 获取维修人员评分统计（基于 repairman_stats 汇总表）
+    // 获取按类别的统计信息（动态查询真实数据）
     @Query(
         value = "SELECT " +
-                "  s.repairman_id, " +
-                "  u.name AS repairman_name, " +
-                "  s.avg_rating, " +
-                "  s.completed_tickets " +
-                "FROM repairman_stats s " +
-                "JOIN sys_user u ON u.user_number = s.repairman_id " +
-                "WHERE u.role = 'STAFF' " +
-                "ORDER BY s.avg_rating DESC",
-        nativeQuery = true
-    )
-    List<Object[]> findRepairmanRatingStats();
-
-    // 获取按类别的统计信息（基于 category_stats 汇总表）
-    @Query(
-        value = "SELECT " +
-                "  s.category_key, " +
-                "  s.category_key AS category_name, " +
-                "  s.total_tickets, " +
-                "  s.completed_tickets, " +
-                "  s.rated_tickets, " +
-                "  s.avg_rating " +
-                "FROM category_stats s",
+                "  c.category_key, " +
+                "  c.category_key AS category_name, " +
+                "  COUNT(t.id) AS total_tickets, " +
+                "  SUM(CASE WHEN t.status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') THEN 1 ELSE 0 END) AS completed_tickets, " +
+                "  SUM(CASE WHEN r.id IS NOT NULL THEN 1 ELSE 0 END) AS rated_tickets, " +
+                "  COALESCE(AVG(r.rating), 0) AS avg_rating " +
+                "FROM repair_category c " +
+                "LEFT JOIN repair_order t ON t.category_key = c.category_key AND (t.is_deleted IS NULL OR t.is_deleted = false) " +
+                "LEFT JOIN repair_feedback r ON r.repair_order_id = t.id " +
+                "GROUP BY c.category_key " +
+                "ORDER BY total_tickets DESC",
         nativeQuery = true
     )
     List<Object[]> findCategoryStatsFromView();
+
+    // 获取维修人员评分统计（动态查询真实数据）
+    @Query(
+        value = "SELECT " +
+                "  u.user_number AS repairman_id, " +
+                "  COALESCE(u.name, u.user_number) AS repairman_name, " +
+                "  COALESCE(AVG(r.rating), 0) AS avg_rating, " +
+                "  COUNT(DISTINCT t.id) AS completed_tickets " +
+                "FROM sys_user u " +
+                "LEFT JOIN repair_order t ON t.repairman_id = u.user_number AND t.status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') AND (t.is_deleted IS NULL OR t.is_deleted = false) " +
+                "LEFT JOIN repair_feedback r ON r.repair_order_id = t.id AND r.repairman_id = u.user_number " +
+                "WHERE u.role = 'STAFF' " +
+                "GROUP BY u.user_number, u.name " +
+                "HAVING completed_tickets > 0 " +
+                "ORDER BY avg_rating DESC, completed_tickets DESC",
+        nativeQuery = true
+    )
+    List<Object[]> findRepairmanRatingStats();
 
     // 使用悲观锁查询工单（用于关键操作）
     @Lock(LockModeType.PESSIMISTIC_WRITE)

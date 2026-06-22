@@ -31,7 +31,9 @@ export const REPAIRMEN = {
 // 将后端状态枚举值映射到前端状态值
 const mapStatusToFrontend = (backendStatus) => {
   if (!backendStatus) return backendStatus;
-  
+
+  console.log('映射状态:', backendStatus, '-> 前端状态');
+
   const statusMap = {
     'WAITING_ACCEPT': 'pending',
     'IN_PROGRESS': 'processing',
@@ -41,17 +43,22 @@ const mapStatusToFrontend = (backendStatus) => {
     'CLOSED': 'closed',
     'REJECTED': 'rejected',
   };
-  
-  // 如果已经是前端格式，直接返回
+
+  // 如果是大写的后端状态枚举值，进行映射
   if (statusMap[backendStatus]) {
-    return statusMap[backendStatus];
+    const frontendStatus = statusMap[backendStatus];
+    console.log('状态映射成功:', backendStatus, '->', frontendStatus);
+    return frontendStatus;
   }
-  
+
   // 如果已经是小写格式（前端格式），直接返回
   if (['pending', 'processing', 'completed', 'to_be_evaluated', 'closed', 'rejected'].includes(backendStatus.toLowerCase())) {
+    console.log('状态已是前端格式:', backendStatus);
     return backendStatus.toLowerCase();
   }
-  
+
+  // 无法识别的状态，记录警告并返回原值
+  console.warn('无法识别的状态值:', backendStatus);
   return backendStatus;
 };
 
@@ -193,15 +200,27 @@ export const mytaskService = {
   // 完成任务
   completeTask: async (taskId, repairmanId, completionNotes = '') => {
     try {
+      console.log('调用完成任务API，任务ID:', taskId, '维修工ID:', repairmanId);
+
       const response = await api.repairman.completeTask(taskId, completionNotes);
-      if (response.code === 200) {
-        message.success('任务完成成功');
-        return response.data;
+
+      console.log('完成任务API响应:', response);
+
+      // 检查响应结构
+      if (response && response.code === 200) {
+        console.log('任务完成成功，返回数据:', response.data);
+        return {
+          success: true,
+          data: response.data,
+          message: response.message || '任务完成成功'
+        };
       } else {
-        throw new Error(response.message || '完成任务失败');
+        const errorMsg = response?.message || '完成任务失败';
+        console.error('完成任务失败，响应:', response);
+        throw new Error(errorMsg);
       }
     } catch (error) {
-      console.error('完成任务失败:', error);
+      console.error('完成任务API调用失败:', error);
       message.error('完成任务失败: ' + error.message);
       throw error;
     }
@@ -228,55 +247,89 @@ export const mytaskService = {
       // 获取所有任务来计算统计数据
       const result = await mytaskService.getMyTasks(repairmanId, {});
       const tasks = result.data || [];
-      
-      console.log('统计数据计算，任务列表:', tasks);
-      
+
+      console.log('========================================');
+      console.log('维修工统计数据计算开始...');
+      console.log('维修工ID:', repairmanId);
+      console.log('任务总数:', tasks.length);
+      console.log('任务列表:', tasks.map(t => ({
+        id: t.id || t.ticketId,
+        status: t.status,
+        originalStatus: t.originalStatus,
+        title: t.title || t.description
+      })));
+      console.log('========================================');
+
       const stats = {
         total: tasks.length,
-        pending: tasks.filter(task => {
-          const status = mapStatusToFrontend(task.status || task.originalStatus);
-          return status === 'pending';
-        }).length,
-        processing: tasks.filter(task => {
-          const status = mapStatusToFrontend(task.status || task.originalStatus);
-          return status === 'processing';
-        }).length,
-        // “已完成”：包含 已完成、本应待评价、已关闭（从维修工视角都已处理完）
-        completed: tasks.filter(task => {
-          const status = mapStatusToFrontend(task.status || task.originalStatus);
-          return (
-            status === 'completed' ||
-            status === 'to_be_evaluated' ||
-            status === 'closed'
-          );
-        }).length,
-        to_be_evaluated: tasks.filter(task => {
-          const status = mapStatusToFrontend(task.status || task.originalStatus);
-          return status === 'to_be_evaluated';
-        }).length,
-        closed: tasks.filter(task => {
-          const status = mapStatusToFrontend(task.status || task.originalStatus);
-          return status === 'closed';
-        }).length,
+        pending: 0,
+        processing: 0,
+        completed: 0,
+        to_be_evaluated: 0,
+        closed: 0,
         averageRating: 0,
       };
-      
-      // 计算平均评分
+
+      // 统计各状态任务
+      tasks.forEach(task => {
+        const status = task.status || mapStatusToFrontend(task.originalStatus);
+        console.log(`任务 ${task.id || task.ticketId}: 状态=”${status}”`);
+
+        switch (status) {
+          case 'pending':
+            stats.pending++;
+            break;
+          case 'processing':
+            stats.processing++;
+            break;
+          case 'completed':
+            // 维修工视角：completed = RESOLVED（已完成维修，等待学生确认/评价）
+            stats.completed++;
+            break;
+          case 'to_be_evaluated':
+            // 维修工视角：to_be_evaluated = WAITING_FEEDBACK（学生已确认，等待评价）
+            stats.to_be_evaluated++;
+            break;
+          case 'closed':
+            // 维修工视角：closed = FEEDBACKED/CLOSED（已评价或已关闭）
+            stats.closed++;
+            break;
+          case 'rejected':
+            // 驳回的任务不计入统计，或者可以单独统计
+            break;
+          default:
+            console.warn(`未知状态: ${status} (任务ID: ${task.id || task.ticketId})`);
+        }
+      });
+
+      console.log('========================================');
+      console.log('统计结果汇总:', stats);
+      console.log(`验证: total(${stats.total}) = pending(${stats.pending}) + processing(${stats.processing}) + completed(${stats.completed}) + to_be_evaluated(${stats.to_be_evaluated}) + closed(${stats.closed})`);
+      console.log(`验证结果: ${stats.total === (stats.pending + stats.processing + stats.completed + stats.to_be_evaluated + stats.closed) ? '✓ 正确' : '✗ 错误'}`);
+      console.log('========================================');
+
+      // 计算平均评分 - 从已评价的任务中获取
       const ratedTasks = tasks.filter(task => {
         const rating = task.rating;
         return rating !== null && rating !== undefined && !isNaN(Number(rating));
       });
+
       if (ratedTasks.length > 0) {
         const totalRating = ratedTasks.reduce(
           (sum, task) => sum + Number(task.rating),
           0
         );
         stats.averageRating = Number(totalRating / ratedTasks.length).toFixed(1);
+        console.log(`平均评分计算: ${ratedTasks.length} 个已评价任务，总分 ${totalRating}, 平均 ${stats.averageRating}`);
+      } else {
+        console.log('暂无已评价任务，平均评分为 0');
       }
-      
+
       return stats;
     } catch (error) {
+      console.error('========================================');
       console.error('获取统计数据失败:', error);
+      console.error('========================================');
       // 返回默认统计数据
       return {
         total: 0,
