@@ -1,179 +1,250 @@
-# 报修系统数据库设计说明
+# 校园报修管理系统
 
-## 1. 数据库结构
+一个基于 Spring Boot + React 的校园报修管理系统，支持学生报修、维修工处理、管理员管理的完整业务流程。
 
-### 1.1 核心实体表
+## 项目结构
 
-#### sys_user (用户表)
-- **主键**: user_number (VARCHAR(255))
-- **字段**:
-    - name: 用户姓名 (VARCHAR(103), NOT NULL)
-    - password: 加密密码 (VARCHAR(255), NOT NULL)
-    - role: 角色 (VARCHAR(20), NOT NULL, ENUM('student', 'staff', 'admin'))
-    - enabled: 是否激活 (BOOLEAN, DEFAULT TRUE)
-    - phone: 联系电话 (VARCHAR(20))
-    - created_at: 创建时间 (DATETIME, NOT NULL)
+```
+-reportingcenter/
+├── backend/              # 后端项目 (Spring Boot)
+│   ├── src/             # 源代码
+│   │   ├── main/
+│   │   │   ├── java/    # Java 代码
+│   │   │   └── resources/ # 资源文件
+│   │   └── test/        # 测试代码
+│   ├── pom.xml          # Maven 配置
+│   └── README.md        # 后端说明文档
+├── frontend/             # 前端项目 (React + Vite)
+│   ├── src/             # 源代码
+│   │   ├── Admin/      # 管理员模块
+│   │   ├── Student/    # 学生模块
+│   │   ├── Worker/     # 维修工模块
+│   │   └── services/   # API 服务
+│   ├── package.json    # 依赖配置
+│   └── vite.config.js  # Vite 配置
+│   └── README.md        # 前端说明文档
+└── README.md             # 本文件
+```
 
-#### repair_category (报修分类表)
-- **主键**: id (BIGINT AUTO_INCREMENT)
-- **字段**:
-    - category_key: 分类标识 (VARCHAR(50), NOT NULL, UNIQUE)
+## 技术栈
 
-#### repair_order (报修单表)
-- **主键**: id (BIGINT AUTO_INCREMENT)
-- **外键**:
-    - student_number → sys_user.user_number
-    - category_key → repair_category.category_key
-    - repairman_id → sys_user.user_number
-- **字段**:
-    - status: 状态 (VARCHAR(30), NOT NULL)
-    - location: 地点描述 (VARCHAR(100), NOT NULL)
-    - description: 问题描述 (TEXT, NOT NULL)
-    - rejection_reason: 驳回理由 (TEXT)
-    - priority: 优先级 (VARCHAR(10), DEFAULT 'medium')
-    - repair_notes: 维修记录 (TEXT)
-    - process_notes: 处理过程 (TEXT)
-    - estimated_completion_time: 预计完成时间 (DATETIME)
-    - created_at: 创建时间 (DATETIME, NOT NULL)
-    - assigned_at: 分配时间 (DATETIME)
-    - completed_at: 完成时间 (DATETIME)
-    - closed_at: 关闭时间 (DATETIME)
+### 后端
+- Spring Boot 3.x
+- Spring Security + JWT
+- JPA / Hibernate
+- MySQL
+- Maven
 
-#### repair_order_image (报修图片表)
-- **主键**: id (BIGINT AUTO_INCREMENT)
-- **外键**: repair_order_id → repair_order.id
-- **字段**:
-    - image_url: 图片URL (VARCHAR(500), NOT NULL)
-    - created_at: 创建时间 (DATETIME, NOT NULL)
+### 前端
+- React 19
+- Vite（构建工具）
+- Ant Design 5
+- React Router
+- Ant Design Charts（数据可视化）
 
-#### repair_order_status_log (工单日志表)
-- **主键**: id (BIGINT AUTO_INCREMENT)
-- **外键**:
-    - repair_order_id → repair_order.id
-    - operate_user_id → sys_user.user_number
-- **字段**:
-    - before_status: 变更前状态 (VARCHAR(30))
-    - after_status: 变更后状态 (VARCHAR(30), NOT NULL)
-    - operate_time: 操作时间 (DATETIME, NOT NULL)
+## 快速开始
 
-#### repair_feedback (服务评价表)
-- **主键**: id (BIGINT AUTO_INCREMENT)
-- **外键**:
-    - repair_order_id → repair_order.id
-    - student_number → sys_user.user_number
-    - repairman_id → sys_user.user_number
-- **字段**:
-    - rating: 评分 (INT, NOT NULL, CHECK(rating >= 1 AND rating <= 5))
-    - comment: 评论 (TEXT)
-    - created_at: 创建时间 (DATETIME, NOT NULL)
+### 🚀 一键启动（推荐）
 
-### 1.2 实体关系
-- Categories (1) → Repair_Tickets (N): 一个分类可以对应多张报修单
-- Users (1) → Repair_Tickets (N): 一个用户可以提交多张报修单
-- Users (1) → Repair_Tickets (N): 一个维修工可以处理多张报修单
-- Repair_Tickets (1) → Ticket_ Images (N): 一张报修单可以有多张图片
-- Repair_Tickets (1) → Ticket_Status_Logs (N): 一张报修单在生命周期中会产生多条状态变更日志
-- Users (1) → Ticket_Status_Logs (N): 一个用户可以执行多次操作
-- Repair_Tickets (1) → Ratings (N): 一张报修单可以有评价
+**最简单的方式**：使用项目提供的启动脚本
 
-## 2. DTO层设计
+#### Windows 批处理脚本（推荐）
 
-### 2.1 请求DTO (request/)
-- **CategoryRequest**: 用于创建/更新分类的请求参数
-- **LoginRequest**: 用于登录的请求参数
-- **ResetPasswordRequest**: 用于重置密码的请求参数
-- **TicketAssignRequest**: 用于分配报修单的请求参数
-- **TicketCreateRequest**: 用于创建报修单的请求参数
-- **TicketImageRequest**: 用于上传图片的请求参数
-- **TicketRatingRequest**: 用于评价报修单的请求参数
-- **TicketStatusUpdateRequest**: 用于更新报修单状态的请求参数
-- **UserRegisterRequest**: 用于用户注册的请求参数
-- **UserUpdateRequest**: 用于更新用户信息的请求参数
+**双击运行**或在命令行运行：
 
-### 2.2 响应DTO (response/)
-- **AuthResponse**: 认证成功的响应数据
-- **ResetPasswordResult**: 重置密码的结果
+```bash
+# 一键启动前后端
+start-all.bat
+```
 
-### 2.3 数据传输对象 (dto/)
-- **CategoryDto**: 传输分类信息
-- **TicketDetailDto**: 传输报修单详细信息
-- **TicketSummaryDto**: 传输报修单摘要信息
-- **UserDto**: 传输用户信息
-- **PagedResult**: 传输分页结果
-- **RatingDto**: 传输评价信息
-- **RepairmanRatingStatsDto**: 传输维修工评价统计信息
-- **LocationStatsDto**: 传输地点统计信息
-- **TicketImageDto**: 传输图片信息
-- **TicketStatusLogDto**: 传输状态日志信息
+或在项目根目录双击 `start-all.bat` 文件。
 
-## 3. 数据库初始化
+这将自动：
+1. 启动后端服务（http://localhost:8080）
+2. 启动前端开发服务器（http://localhost:3000）
+3. 在两个独立的命令行窗口中运行
 
-数据库初始化脚本位于 `src/main/resources/schema.sql`，包含以下内容：
-1. 删除已存在的表（按依赖顺序）
-2. 创建所有表结构
-3. 插入初始数据（分类、预置用户等）
+#### 单独启动后端
 
-## 4. 文件夹结构说明
+```bash
+cd backend
+start-backend.bat
+```
 
-### src/main/java/com/ligong/reportingcenter/domain/entity/
-- **作用**: 存放JPA实体类，与数据库表一一对应
-- **职责**:
-    - 定义业务实体的数据模型
-    - 配置与数据库的映射关系
-    - 实现业务逻辑的持久化操作
+或双击 `backend/start-backend.bat` 文件。
 
-### src/main/java/com/ligong/reportingcenter/dto/
-- **作用**: 存放数据传输对象
-- **职责**:
-    - **request/**: 定义API请求参数
-    - **response/**: 定义API响应数据
-    - **其他**: 定义内部数据传输对象
+#### 单独启动前端
 
-### src/main/java/com/ligong/reportingcenter/repository/
-- **作用**: 存放数据访问接口
-- **职责**:
-    - 定义数据库操作方法
-    - 提供CRUD操作
-    - 实现复杂查询
+```bash
+cd frontend
+start-frontend.bat
+```
 
-### src/main/java/com/ligong/reportingcenter/service/
-- **作用**: 存放业务逻辑服务
-- **职责**:
-    - 封装业务规则
-    - 协调多个Repository的操作
-    - 实现事务管理
+或双击 `frontend/start-frontend.bat` 文件。
 
-### src/main/java/com/ligong/reportingcenter/controller/
-- **作用**: 存放RESTful API控制器
-- **职责**:
-    - 接收HTTP请求
-    - 调用Service层处理业务
-    - 返回JSON响应
+#### PowerShell 脚本（需设置执行策略）
 
-### src/main/java/com/ligong/reportingcenter/util/
-- **作用**: 存放工具类
-- **职责**:
-    - 提供通用功能（如JWT处理）
-    - 封装重复代码
-    - 提供辅助方法
+如果已设置 PowerShell 执行策略，可使用：
 
-### src/main/resources/
-- **作用**: 存放配置文件和资源
-- **职责**:
-    - **application.yml**: 应用配置
-    - **schema.sql**: 数据库初始化脚本
-    - **static/**: 静态资源
-    - **templates/**: 模板文件
+```powershell
+.\start-all.ps1
+```
 
-## 5. 开发规范
+---
 
-### 5.1 命名规范
-- **包名**: 使用小写字母，用点分隔
-- **类名**: 使用大驼峰命名法
-- **方法名**: 使用小驼峰命名法
-- **字段名**: 使用小驼峰命名法
+### 📋 手动启动
 
+#### 后端启动
 
+```bash
+cd backend
+mvn spring-boot:run
+```
 
+访问：http://localhost:8080
 
+#### 前端开发
 
+```bash
+cd frontend
+npm install  # 首次运行需要安装依赖
+npm run dev
+```
+
+开发服务器运行在 http://localhost:3000，API 请求自动代理到后端。
+
+---
+
+### 🔨 前端构建与集成
+
+```bash
+cd frontend
+npm run build
+```
+
+构建产物自动输出到 `backend/src/main/resources/static/`，与后端集成。
+
+启动后端后访问 http://localhost:8080 即可使用完整应用。
+
+---
+
+### ⚙️ 环境要求
+
+- **Java**: JDK 21+ (启动脚本自动配置)
+- **Maven**: 3.6+
+- **Node.js**: 18+
+- **MySQL**: 8.0+ (需提前启动服务)
+
+---
+
+### 📝 首次运行注意事项
+
+1. **数据库配置**：
+   - 确保 MySQL 服务已启动
+   - 数据库 `repairdb` 会自动创建
+   - 初始账号在 `backend/src/main/resources/schema.sql`
+
+2. **前端依赖**：
+   - 首次运行前端需要先执行 `npm install`
+
+3. **启动顺序**：
+   - 建议先启动后端，等待数据库初始化完成
+   - 再启动前端开发服务器
+
+4. **PowerShell 执行策略**（仅对 .ps1 脚本）：
+   - 如果遇到"禁止运行脚本"错误，使用 .bat 脚本
+   - 或设置执行策略：`Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+
+## 功能特性
+
+### 学生端
+- 提交报修申请（支持图片上传）
+- 查看我的报修单列表
+- 查看报修单详情和进度
+- 评价维修服务
+- 个人信息管理
+
+### 维修工端
+- 查看分配的任务列表
+- 开始/完成维修任务
+- 添加维修记录和说明
+- 查看任务详情
+- 个人信息管理
+
+### 管理员端
+- 用户管理（学生、维修工的增删改查）
+- 工单管理（分配、驳回、状态跟踪）
+- 数据统计分析（分类统计、地点统计、评分统计）
+- 系统备份与恢复
+- 反馈管理
+- 密码重置
+
+## 数据库配置
+
+在 `backend/src/main/resources/application.yml` 中配置数据库连接：
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/repairdb
+    username: your_username
+    password: your_password
+```
+
+首次启动时会自动创建数据库表结构。
+
+## API 文档
+
+主要 API 端点：
+
+- `/api/auth/**` - 认证相关
+- `/api/tickets/**` - 报修单管理
+- `/api/users/**` - 用户管理
+- `/api/categories/**` - 分类管理
+- `/api/admin/backup/**` - 备份管理（需管理员权限）
+
+详细 API 文档请参考后端 README.md。
+
+## 开发指南
+
+### 分支管理
+- `main` - 生产分支
+- `develop` - 开发分支
+- `feature/*` - 功能分支
+
+### 提交规范
+- `feat`: 新功能
+- `fix`: 修复 bug
+- `docs`: 文档更新
+- `refactor`: 代码重构
+- `test`: 测试相关
+
+## 部署说明
+
+### 后端部署
+
+```bash
+cd backend
+mvn clean package
+java -jar target/repairing-center-0.0.1-SNAPSHOT.jar
+```
+
+### 前端部署
+
+前端已配置自动集成，构建产物直接输出到后端静态资源目录：
+
+```bash
+cd frontend
+npm run build  # 自动输出到 backend/src/main/resources/static/
+```
+
+或使用一体化构建：
+
+```bash
+# 在项目根目录
+cd frontend && npm run build && cd ../backend && mvn clean package
+```
+
+## 许可证
+
+本项目仅供学习使用。

@@ -1,0 +1,553 @@
+/* 政务轻量化扁平化B端门户风格 */
+
+/* 根字体大小 */
+html {
+  font-size: 16px;
+}
+
+body {
+  font-size: 1rem;
+  background: #FFFFFF;
+  color: #1f1f1f;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+/* ========== 色彩规范 ========== */
+:root {
+  /* 主色 */
+  --primary-color: #0F52BA;
+  --primary-hover: #1a5fb8;
+  --primary-active: #0a4094;
+
+  /* 功能色 - 低饱和马卡龙色 */
+  --success-color: #86c8bc;
+  --warning-color: #f5c26b;
+  --error-color: #e88080;
+  --info-color: #7eb8da;
+
+  /* 文字三层灰度 */
+  --text-primary: #1f1f1f;
+  --text-secondary: #5c5c5c;
+  --text-disabled: #8c8c8c;
+
+  /* 背景 */
+  --bg-white: #FFFFFF;
+  --bg-card: #F8FAFC;
+  --bg-hover: #f1f5f9;
+
+  /* 边框/阴影 */
+  --border-color: #e8e8e8;
+  --shadow-light: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 2px 8px rgba(15, 82, 186, 0.06);
+}
+
+/* ========== Layout 布局 ========== */
+.ant-layout {
+  background: #FFFFFF;
+}
+
+.ant-layout-sider {
+  background: #0F52BA !important;
+  box-shadow: none;
+}
+
+.ant-layout-header {
+  background: #FFFFFF !important;
+  border-bottom: 1px solid #e8e8e8;
+  height: 56px;
+  line-height: 56px;
+  padding: 0 24px;
+}
+
+.ant-layout-content {
+  background: #FFFFFF;
+  padding: 20px;
+}
+
+/* ========== Menu 菜单 ========== */
+.ant-menu-dark .ant-menu-item {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 15px;
+  font-weight: 400;
+  margin: 4px 8px;
+  border-radius: 6px;
+  height: 44px;
+  line-height: 44px;
+}
+
+.ant-menu-dark .ant-menu-item-selected {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF;
+  font-weight: 500;
+}
+
+.ant-menu-dark .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ant-menu-dark .ant-menu-item-icon {
+  font-size: 16px;
+}
+
+/* ========== Card 卡片 ========== */
+.ant-card {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(15, 82, 186, 0.06);
+  background: #F8FAFC;
+}
+
+.ant-card-head {
+  background: #FFFFFF;
+  border-bottom: 1px solid #e8e8e8;
+  padding: 16px 20px;
+  border-radius: 8px 8px 0 0;
+}
+
+.ant-card-head-title {
+  color: #1f1f1f;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ant-card-body {
+  padding: 20px;
+  font-size: 15px;
+  background: #F8FAFC;
+}
+
+/* ========== Table 表格 ========== */
+.ant-table {
+  border-radius: 8px;
+  font-size: 15px;
+  background: #FFFFFF;
+}
+
+.ant-table-thead > tr > th {
+  background: #F8FAFC;
+  color: #1f1f1f;
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid #e8e8e8;
+  padding: 14px 16px;
+}
+
+.ant-table-tbody > tr > td {
+  padding: 14px 16px;
+  font-size: 15px;
+  color: #5c5c5c;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #f8fafc;
+}
+
+/* ========== Button 按钮 ========== */
+.ant-btn {
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 400;
+  height: 36px;
+  padding: 0 16px;
+  transition: all 0.2s;
+  box-shadow: none;
+}
+
+.ant-btn-primary {
+  background: #0F52BA;
+  border: none;
+  color: #FFFFFF;
+}
+
+.ant-btn-primary:hover {
+  background: #1a5fb8;
+  border: none;
+}
+
+.ant-btn-default {
+  background: transparent;
+  border: 1px solid #0F52BA;
+  color: #0F52BA;
+}
+
+.ant-btn-default:hover {
+  background: #f8fafc;
+  border: 1px solid #0F52BA;
+  color: #0F52BA;
+}
+
+.ant-btn-link {
+  color: #0F52BA;
+  font-size: 15px;
+  padding: 0 8px;
+}
+
+.ant-btn-link:hover {
+  color: #1a5fb8;
+}
+
+/* ========== Input 输入框 ========== */
+.ant-input {
+  border-radius: 6px;
+  border: 1px solid #d9d9d9;
+  font-size: 15px;
+  padding: 8px 12px;
+  height: 36px;
+  background: #FFFFFF;
+}
+
+.ant-input:focus,
+.ant-input-focused {
+  border-color: #0F52BA;
+  box-shadow: 0 0 0 2px rgba(15, 82, 186, 0.08);
+}
+
+.ant-input-lg {
+  font-size: 15px;
+  padding: 10px 14px;
+  height: 40px;
+}
+
+.ant-input-affix-wrapper {
+  border-radius: 6px;
+  border: 1px solid #d9d9d9;
+  padding: 4px 12px;
+}
+
+/* ========== Select 选择器 ========== */
+.ant-select-selector {
+  border-radius: 6px !important;
+  border: 1px solid #d9d9d9 !important;
+  font-size: 15px !important;
+  height: 36px !important;
+  padding: 4px 12px !important;
+  background: #FFFFFF !important;
+}
+
+.ant-select-selection-item {
+  font-size: 15px;
+  line-height: 28px;
+  color: #1f1f1f;
+}
+
+.ant-select-focused .ant-select-selector {
+  border-color: #0F52BA !important;
+  box-shadow: 0 0 0 2px rgba(15, 82, 186, 0.08) !important;
+}
+
+.ant-select-dropdown {
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.ant-select-item {
+  font-size: 15px;
+  padding: 8px 12px;
+}
+
+.ant-select-item-option-selected {
+  background: #f8fafc;
+  color: #0F52BA;
+}
+
+/* ========== Form 表单 ========== */
+.ant-form-item-label > label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1f1f1f;
+}
+
+.ant-form-item {
+  margin-bottom: 20px;
+}
+
+/* ========== Modal 模态框 ========== */
+.ant-modal-content {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.ant-modal-header {
+  background: #FFFFFF;
+  border-bottom: 1px solid #e8e8e8;
+  padding: 16px 20px;
+  border-radius: 8px 8px 0 0;
+}
+
+.ant-modal-title {
+  color: #1f1f1f;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ant-modal-body {
+  padding: 20px;
+  font-size: 15px;
+  background: #FFFFFF;
+}
+
+.ant-modal-close {
+  color: #8c8c8c;
+}
+
+.ant-modal-close:hover {
+  color: #5c5c5c;
+}
+
+.ant-modal-footer {
+  border-top: 1px solid #e8e8e8;
+  padding: 12px 20px;
+  background: #FFFFFF;
+}
+
+/* ========== Tag 标签 ========== */
+.ant-tag {
+  border-radius: 4px;
+  font-size: 13px;
+  padding: 2px 8px;
+  font-weight: 400;
+  border: none;
+}
+
+/* 状态标签 - 低饱和马卡龙色 */
+.tag-pending {
+  background: #f5c26b;
+  color: #8b6914;
+}
+
+.tag-processing {
+  background: #7eb8da;
+  color: #0F52BA;
+}
+
+.tag-completed {
+  background: #86c8bc;
+  color: #2d7a6e;
+}
+
+.tag-rejected {
+  background: #e88080;
+  color: #a84040;
+}
+
+.tag-info {
+  background: #e8e8e8;
+  color: #5c5c5c;
+}
+
+/* ========== Statistic 统计数值 ========== */
+.ant-statistic-title {
+  font-size: 13px;
+  color: #8c8c8c;
+  font-weight: 400;
+}
+
+.ant-statistic-content-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+/* ========== Descriptions 描述列表 ========== */
+.ant-descriptions-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 12px;
+}
+
+.ant-descriptions-item-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #5c5c5c;
+  background: #f8fafc;
+}
+
+.ant-descriptions-item-content {
+  font-size: 15px;
+  color: #1f1f1f;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-label {
+  background: #f8fafc;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-content {
+  background: #FFFFFF;
+}
+
+.ant-descriptions-bordered .ant-descriptions-row {
+  border-bottom: 1px solid #e8e8e8;
+}
+
+/* ========== Dropdown 下拉菜单 ========== */
+.ant-dropdown-menu {
+  border-radius: 6px;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e8e8e8;
+}
+
+.ant-dropdown-menu-item {
+  font-size: 15px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: #1f1f1f;
+}
+
+.ant-dropdown-menu-item:hover {
+  background: #f8fafc;
+}
+
+.ant-dropdown-menu-item-danger {
+  color: #e88080;
+}
+
+/* ========== Avatar 头像 ========== */
+.ant-avatar {
+  border: none;
+  box-shadow: none;
+  background: #0F52BA;
+}
+
+/* ========== Tabs 标签页 ========== */
+.ant-tabs-tab {
+  font-size: 15px;
+  font-weight: 400;
+  padding: 10px 16px;
+  color: #5c5c5c;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #0F52BA;
+  font-weight: 500;
+}
+
+.ant-tabs-ink-bar {
+  background: #0F52BA;
+  height: 2px;
+}
+
+.ant-tabs-top > .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+/* ========== Spin 加载 ========== */
+.ant-spin-dot-item {
+  background-color: #0F52BA;
+}
+
+/* ========== Rate 评分 ========== */
+.ant-rate-star-full .ant-rate-star-first,
+.ant-rate-star-full .ant-rate-star-second {
+  color: #0F52BA;
+}
+
+.ant-rate-star {
+  font-size: 20px;
+}
+
+/* ========== Pagination 分页 ========== */
+.ant-pagination-item {
+  border-radius: 6px;
+  font-size: 14px;
+  min-width: 32px;
+  height: 32px;
+  line-height: 32px;
+  border: 1px solid #d9d9d9;
+}
+
+.ant-pagination-item-active {
+  background: #0F52BA;
+  border-color: #0F52BA;
+  color: #FFFFFF;
+}
+
+.ant-pagination-item:hover {
+  border-color: #0F52BA;
+}
+
+/* ========== Popconfirm 确认气泡 ========== */
+.ant-popconfirm .ant-popover-message-title {
+  font-size: 15px;
+  color: #1f1f1f;
+}
+
+.ant-popover {
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* ========== Upload 上传 ========== */
+.ant-upload-list-item {
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+.ant-upload-btn {
+  border-radius: 6px;
+}
+
+/* ========== 滚动条 ========== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}
+
+/* ========== 页面标题样式 ========== */
+.page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+/* ========== 统计卡片样式 ========== */
+.stat-card {
+  background: #FFFFFF;
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(15, 82, 186, 0.06);
+}
+
+.stat-card .ant-card-body {
+  background: #FFFFFF;
+}
+
+/* ========== 内容区域 ========== */
+.content-wrapper {
+  padding: 20px;
+  background: #FFFFFF;
+  border-radius: 8px;
+}
+
+/* ========== 筛选器样式 ========== */
+.filter-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: #5c5c5c;
+  margin-right: 8px;
+}
+
+/* ========== 表格行样式 ========== */
+.table-row-hover:hover {
+  background: #f8fafc;
+}
