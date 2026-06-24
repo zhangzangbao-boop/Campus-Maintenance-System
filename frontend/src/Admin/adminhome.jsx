@@ -29,13 +29,28 @@ const AdminHome = () => {
   const [personalInfoModalVisible, setPersonalInfoModalVisible] =
     useState(false);
 
-  // 新增状态：当前管理员信息
-  const [currentAdmin, setCurrentAdmin] = useState({
-    username: "admin",
-    email: "admin@manage.edu.cn",
-    phone: "",
-    department: "系统管理部",
-    position: "系统管理员",
+  // 新增状态：当前管理员信息 - 从localStorage读取
+  const [currentAdmin, setCurrentAdmin] = useState(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const user = JSON.parse(storedUser);
+      return {
+        username: user.nickname || user.userId || "管理员",
+        userId: user.userId,
+        email: user.email || "admin@manage.edu.cn",
+        phone: user.contactPhone || "",
+        department: "系统管理部",
+        position: "系统管理员",
+        role: user.role,
+      };
+    }
+    return {
+      username: "管理员",
+      email: "admin@manage.edu.cn",
+      phone: "",
+      department: "系统管理部",
+      position: "系统管理员",
+    };
   });
 
   // 侧边栏菜单配置

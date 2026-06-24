@@ -666,7 +666,10 @@ public class TicketService {
                 rating.getScore(),
                 rating.getComment(),
                 rating.getStudent() != null ? rating.getStudent().getUserId() : null,
+                rating.getStudent() != null ? rating.getStudent().getNickname() : null,
                 rating.getStaff() != null ? rating.getStaff().getUserId() : null,
+                rating.getStaff() != null ? rating.getStaff().getNickname() : null,
+                ticket.getTicketId(),
                 rating.getRatedAt()
             ))
             .orElse(null);

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql -u repairuser -p123456 repairdb -e \"SHOW TABLES;\")",
+      "Bash(mysql -u repairuser -p123456 repairdb -e \"SELECT COUNT\\(*\\) as count FROM repair_order; SELECT COUNT\\(*\\) as count FROM repair_order_image; SELECT COUNT\\(*\\) as count FROM repair_order_status_log; SELECT COUNT\\(*\\) as count FROM repair_feedback;\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/api/categories)"
+    ]
+  }
+}

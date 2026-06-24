@@ -1,5 +1,5 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Layout, Menu, Avatar, Space, Card } from "antd";
 import {
   UserOutlined,
@@ -19,13 +19,28 @@ const WorkerHome = () => {
   // 新增状态：控制个人信息编辑弹窗显示
   const [personalInfoModalVisible, setPersonalInfoModalVisible] =
     useState(false);
-  // 新增状态：当前维修工信息
-  const [currentWorker, setCurrentWorker] = useState({
-    username: "worker",
-    email: "worker@repair.com",
-    phone: "",
-    department: "维修部",
-    position: "维修工",
+  // 新增状态：当前维修工信息 - 从localStorage读取
+  const [currentWorker, setCurrentWorker] = useState(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const user = JSON.parse(storedUser);
+      return {
+        username: user.nickname || user.userId || "维修工",
+        userId: user.userId,
+        email: user.email || "worker@repair.com",
+        phone: user.contactPhone || "",
+        department: "维修部",
+        position: "维修工",
+        role: user.role,
+      };
+    }
+    return {
+      username: "维修工",
+      email: "worker@repair.com",
+      phone: "",
+      department: "维修部",
+      position: "维修工",
+    };
   });
 
   // 侧边栏菜单配置 - 只有"我的任务"一项
@@ -152,7 +167,7 @@ const WorkerHome = () => {
           </div>
 
           <Space size="middle">
-            <span style={{ fontSize: "15px", color: "#5c5c5c" }}>欢迎，维修工</span>
+            <span style={{ fontSize: "15px", color: "#5c5c5c" }}>欢迎，{currentWorker.username}</span>
             <Dropdown
               menu={{
                 items: avatarMenuItems,

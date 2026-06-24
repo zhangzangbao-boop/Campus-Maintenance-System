@@ -23,14 +23,30 @@ const Home = () => {
   // 新增状态：控制个人信息编辑弹窗显示
   const [personalInfoModalVisible, setPersonalInfoModalVisible] = useState(false);
 
-  // 新增状态：当前用户信息
-  const [currentUser, setCurrentUser] = useState({
-    username: "stu",
-    email: "stu@student.edu.cn",
-    phone: "",
-    department: "计算机学院",
-    position: "学生",
-    studentID: "001",
+  // 新增状态：当前用户信息 - 从localStorage读取
+  const [currentUser, setCurrentUser] = useState(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const user = JSON.parse(storedUser);
+      return {
+        username: user.nickname || user.userId || "学生用户",
+        userId: user.userId,
+        email: user.email || "",
+        phone: user.contactPhone || "",
+        department: "学生",
+        position: "学生",
+        studentID: user.userId,
+        role: user.role,
+      };
+    }
+    return {
+      username: "学生用户",
+      email: "",
+      phone: "",
+      department: "学生",
+      position: "学生",
+      studentID: "",
+    };
   });
 
   // 侧边栏菜单配置
