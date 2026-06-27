@@ -89,4 +89,28 @@ public interface TicketRepository extends JpaRepository<RepairTicket, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT rt FROM RepairTicket rt WHERE rt.ticketId = :id")
     Optional<RepairTicket> findByIdWithLock(@Param("id") Long id);
+
+    // 获取平均处理时间（从创建到完成的平均时长，单位：小时）
+    @Query(
+        value = "SELECT " +
+                "  AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) AS avg_hours " +
+                "FROM repair_order " +
+                "WHERE status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND completed_at IS NOT NULL " +
+                "  AND created_at IS NOT NULL " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Double findAverageProcessingTimeHours();
+
+    // 获取已完成工单数量（用于统计）
+    @Query(
+        value = "SELECT COUNT(*) " +
+                "FROM repair_order " +
+                "WHERE status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND completed_at IS NOT NULL " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Long countCompletedTickets();
 }

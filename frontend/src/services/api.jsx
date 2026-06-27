@@ -309,6 +309,9 @@ const api = {
     // 新增：获取工单状态统计
     getStatsOrderStatus: () => request("/admin/stats/status"),
 
+    // 新增：获取平均处理时间统计
+    getStatsProcessingTime: () => request("/admin/stats/processing-time"),
+
     // 备份相关接口
     createBackup: () => request("/admin/backup/create", { method: "POST" }),
     listBackups: () => request("/admin/backup/list"),

@@ -165,6 +165,7 @@ const MyRepairs = ({ onRefresh }) => {
           status: mappedStatus, // 映射状态
           originalStatus: backendStatus, // 保存原始状态
           title: title, // 确保标题正确生成，与description区分
+          rating: order.ratingScore || order.rating || null, // 映射评价分数
         };
 
         console.log(`映射后的订单 ${index + 1}:`, mappedOrder);
@@ -189,7 +190,8 @@ const MyRepairs = ({ onRefresh }) => {
       setRepairOrders(mappedData);
       setFilteredOrders(mappedData);
 
-      message.success(`成功加载 ${mappedData.length} 条报修记录`);
+      // 不再每次加载都弹提示，用户可以从表格看到数据
+      console.log(`成功加载 ${mappedData.length} 条报修记录`);
 
     } catch (error) {
       console.error('========================================');
@@ -677,10 +679,11 @@ const MyRepairs = ({ onRefresh }) => {
             </Popconfirm>
           )}
 
-          {/* 待评价状态或已完成状态（未评价）可以评价 */}
-          {(record.status === "to_be_evaluated" || 
-            (record.status === "completed" && !record.rating) ||
-            (record.status === "closed" && !record.rating)) && (
+          {/* 待评价状态可以评价：to_be_evaluated (RESOLVED/WAITING_FEEDBACK) */}
+          {(record.status === "to_be_evaluated" ||
+            (record.status === "closed" && !record.rating) ||
+            (record.status === "completed" && !record.rating)) &&
+           !record.rating && (
             <Button
               type="link"
               icon={<StarOutlined />}
@@ -690,6 +693,13 @@ const MyRepairs = ({ onRefresh }) => {
             >
               评价
             </Button>
+          )}
+
+          {/* 已评价显示已评价标签：有评价分数或状态为FEEDBACKED */}
+          {(record.rating || record.originalStatus === 'FEEDBACKED') && (
+            <Tag color="success" style={{ marginLeft: 8 }}>
+              已评价
+            </Tag>
           )}
         </Space>
       ),

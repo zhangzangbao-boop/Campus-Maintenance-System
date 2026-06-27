@@ -618,8 +618,42 @@ public class TicketService {
             statusStats.put(status.name(), ticketRepository.countByStatus(status));
         }
         monthlyStats.put("statusDistribution", statusStats);
-        
+
         return monthlyStats;
+    }
+
+    // 新增方法：获取平均处理时间（从创建到完成）
+    @Transactional(readOnly = true)
+    public Map<String, Object> getAverageProcessingTime() {
+        Double avgHours = ticketRepository.findAverageProcessingTimeHours();
+        Long completedCount = ticketRepository.countCompletedTickets();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("completedTickets", completedCount);
+
+        if (avgHours != null && avgHours > 0 && completedCount > 0) {
+            // 将小时转换为更友好的格式
+            double totalHours = avgHours;
+
+            if (totalHours >= 24) {
+                // 超过24小时，显示天数
+                double days = totalHours / 24;
+                result.put("avgHours", Math.round(totalHours));
+                result.put("avgDays", Math.round(days * 10) / 10.0); // 保留一位小数
+                result.put("displayText", String.format("约 %.1f 天", days));
+            } else {
+                // 少于24小时，显示小时
+                result.put("avgHours", Math.round(totalHours));
+                result.put("avgDays", 0);
+                result.put("displayText", String.format("约 %.0f 小时", totalHours));
+            }
+        } else {
+            result.put("avgHours", 0);
+            result.put("avgDays", 0);
+            result.put("displayText", "暂无数据");
+        }
+
+        return result;
     }
 
     private RepairTicket findTicket(Long ticketId) {

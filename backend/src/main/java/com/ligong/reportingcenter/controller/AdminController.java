@@ -196,11 +196,24 @@ public class AdminController {
                 return item;
             })
             .collect(java.util.stream.Collectors.toList());
-        
+
         Map<String, Object> result = new HashMap<>();
         result.put("code", 200);
         result.put("message", "获取成功");
         result.put("data", ratingData);
+        return result;
+    }
+
+    // 新增：获取平均处理时间统计
+    @GetMapping("/stats/processing-time")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> getProcessingTimeStats() {
+        Map<String, Object> processingTimeStats = ticketService.getAverageProcessingTime();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", processingTimeStats);
         return result;
     }
 

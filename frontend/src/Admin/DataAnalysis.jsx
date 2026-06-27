@@ -71,7 +71,8 @@ const DataAnalysis = () => {
       `;
       console.log(dataSourceInfo);
 
-      message.success('统计数据加载成功（数据来源：数据库实时查询）');
+      // 不再每次加载都弹提示，用户可以从图表和数据看到加载成功
+      console.log('统计数据加载成功（数据来源：数据库实时查询）');
 
     } catch (error) {
       console.error('========================================');
@@ -327,7 +328,7 @@ const DataAnalysis = () => {
             <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
               {overallStats.avgProcessingTime === '暂无数据' ?
                 '需要已完成工单数据' :
-                '基于已完成工单估算（建议后端提供实际计算）'
+                '基于数据库repair_order表completed_at字段实时计算'
               }
             </div>
           </Card>

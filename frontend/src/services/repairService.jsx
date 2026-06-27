@@ -177,6 +177,7 @@ export const repairService = {
             repairmanName: order.staffName || null, // 添加维修人员名称
             status: frontendStatus, // 映射状态
             title: title, // 确保标题正确生成，与description区分
+            rating: order.ratingScore || order.rating || null, // 映射评价分数
           };
         }) : [];
         

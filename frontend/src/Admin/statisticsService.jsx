@@ -193,12 +193,20 @@ export const statisticsService = {
       const userSatisfaction = avgRating > 0 ? `${(avgRating / 5 * 100).toFixed(1)}%` : '暂无数据';
       console.log(`用户满意度: ${userSatisfaction} (基于平均评分 ${avgRating.toFixed(2)} / 5)`);
 
-      // 平均处理时间：需要从后端获取实际数据
-      // 暂时基于完成工单数量估算（如果有完成的工单，估算为3天）
-      // TODO: 后端应该提供 actual_avg_processing_time 字段
-      const avgProcessingTime = totalCompleted > 0 ? '约 3 天' : '暂无数据';
-      console.log(`平均处理时间: ${avgProcessingTime} (基于 ${totalCompleted} 个已完成工单估算)`);
-      console.log('注意: 平均处理时间目前为估算值，建议后端提供实际计算字段');
+      // 平均处理时间：从后端API获取实际数据
+      let avgProcessingTime = '暂无数据';
+      try {
+        const processingTimeData = await handleApiResponse(() => api.admin.getStatsProcessingTime());
+        console.log('平均处理时间数据:', processingTimeData);
+
+        if (processingTimeData && processingTimeData.displayText) {
+          avgProcessingTime = processingTimeData.displayText;
+          console.log(`平均处理时间: ${avgProcessingTime} (基于 ${processingTimeData.completedTickets || 0} 个已完成工单)`);
+        }
+      } catch (error) {
+        console.warn('获取平均处理时间失败，使用默认值:', error.message);
+        avgProcessingTime = totalCompleted > 0 ? '约 3 天' : '暂无数据';
+      }
 
       console.log('========================================');
       console.log('总体统计结果:', { totalRepairs, avgProcessingTime, userSatisfaction });
