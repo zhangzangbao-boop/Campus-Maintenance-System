@@ -17,7 +17,23 @@ public record TicketRatingRequest(
     Integer score,
 
     @Size(max = 1000, message = "评价内容过长")
-    String comment
+    String comment,
+
+    @Min(value = 1, message = "维修速度评分不能小于1")
+    @Max(value = 5, message = "维修速度评分不能大于5")
+    Integer speedRating,
+
+    @Min(value = 1, message = "维修质量评分不能小于1")
+    @Max(value = 5, message = "维修质量评分不能大于5")
+    Integer qualityRating,
+
+    @Min(value = 1, message = "服务态度评分不能小于1")
+    @Max(value = 5, message = "服务态度评分不能大于5")
+    Integer attitudeRating,
+
+    Boolean resolved,
+
+    Boolean anonymous
 ) {
 }
 

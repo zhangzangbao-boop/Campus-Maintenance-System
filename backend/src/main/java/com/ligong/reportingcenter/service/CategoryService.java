@@ -62,6 +62,12 @@ public class CategoryService {
         return categoryRepository.findById(categoryId)
             .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "分类不存在"));
     }
+
+    @Transactional(readOnly = true)
+    public Category getByName(String categoryName) {
+        return categoryRepository.findByCategoryName(categoryName)
+            .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "分类不存在"));
+    }
     
     @Transactional(readOnly = true)
     public List<Category> listAllCategories() {

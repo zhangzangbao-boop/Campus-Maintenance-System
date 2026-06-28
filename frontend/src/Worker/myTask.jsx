@@ -3,18 +3,32 @@ import React, { useState, useEffect } from 'react';
 import {
   Table, Tag, Button, Space, Select, Input,
   Modal, Form,  Card, Row, Col,
-  Statistic, Progress, Descriptions, Image, message
+  Statistic, Progress, Descriptions, Image, message, List, Spin, Alert
 } from 'antd';
 import { SearchOutlined, PlayCircleOutlined, CheckCircleOutlined,
   EditOutlined, EyeOutlined, ClockCircleOutlined,
   ExclamationCircleOutlined, StarOutlined
 } from '@ant-design/icons';
 import { mytaskService, mytaskUtils } from './mytaskService.jsx';
+import RepairTimeline from '../components/RepairTimeline';
+import TicketComments from '../components/TicketComments';
+import RepairProcessRecords from '../components/RepairProcessRecords';
+import api from '../services/api';
 
 const { Option } = Select;
 const { Search } = Input;
 
-const MyTask = () => {
+const isSameDay = (value) => {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+};
+
+const MyTask = ({ targetTaskId, onTargetTaskHandled, initialFilters, overdueOnly = false, todayOnly = false, title = "任务列表" }) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
@@ -30,6 +44,9 @@ const MyTask = () => {
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [knowledgeRecommendations, setKnowledgeRecommendations] = useState([]);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [startForm] = Form.useForm();
   const [completeForm] = Form.useForm();
   const [notesForm] = Form.useForm();
@@ -227,13 +244,37 @@ const MyTask = () => {
       });
     }
 
+    if (todayOnly) {
+      result = result.filter(task => isSameDay(task.assigned_at || task.created_at));
+    }
+
+    if (overdueOnly) {
+      result = result.filter(task => mytaskUtils.isTaskOverdue(task));
+    }
+
     setFilteredTasks(result);
   };
 
   // 当任务列表或筛选条件变化时，重新计算本地筛选结果
   useEffect(() => {
     applyFilters();
-  }, [tasks, filters]);
+  }, [tasks, filters, todayOnly, overdueOnly]);
+
+  useEffect(() => {
+    if (!initialFilters) return;
+    setFilters((prev) => ({
+      ...prev,
+      status: initialFilters.status || 'all',
+      category: initialFilters.category || 'all',
+      priority: initialFilters.priority || 'all',
+      keyword: initialFilters.keyword || '',
+    }));
+  }, [
+    initialFilters?.status,
+    initialFilters?.category,
+    initialFilters?.priority,
+    initialFilters?.keyword,
+  ]);
 
   // 打开开始任务模态框
   const handleStartClick = (task) => {
@@ -251,6 +292,51 @@ const MyTask = () => {
     completeForm.setFieldsValue({
       notes: task.notes || task.processNotes || '',
     });
+  };
+
+  const handleGenerateReport = async () => {
+    if (!selectedTask) return;
+    setReportGenerating(true);
+    try {
+      const values = completeForm.getFieldsValue();
+      const response = await api.ai.generateRepairReport({
+        description: selectedTask.description || selectedTask.problemDescription || '',
+        processNotes: values.notes || selectedTask.processNotes || selectedTask.notes || '',
+      });
+      const report = response?.data?.report;
+      if (report) {
+        completeForm.setFieldsValue({ notes: report });
+        message.success('AI 维修报告已生成');
+      } else {
+        message.warning('未生成有效报告，请手动填写');
+      }
+    } catch (error) {
+      console.error('AI 维修报告生成失败:', error);
+      message.warning(`AI 维修报告生成失败：${error.message}`);
+    } finally {
+      setReportGenerating(false);
+    }
+  };
+
+  const loadKnowledgeRecommendations = async (task) => {
+    if (!task) {
+      setKnowledgeRecommendations([]);
+      return;
+    }
+    setKnowledgeLoading(true);
+    try {
+      const response = await api.knowledgeBase.recommend({
+        categoryKey: task.category,
+        text: `${task.location || ''} ${task.description || ''} ${task.notes || task.processNotes || ''}`,
+        limit: 3,
+      });
+      setKnowledgeRecommendations(Array.isArray(response?.data) ? response.data : []);
+    } catch (error) {
+      console.warn('维修方案推荐加载失败:', error);
+      setKnowledgeRecommendations([]);
+    } finally {
+      setKnowledgeLoading(false);
+    }
   };
 
   // 打开更新备注模态框
@@ -273,6 +359,7 @@ const MyTask = () => {
       }
       const taskDetail = await mytaskService.getTaskById(taskId, currentRepairmanId);
       setSelectedTask(taskDetail);
+      loadKnowledgeRecommendations(taskDetail);
       setDetailModalVisible(true);
     } catch (error) {
       console.error('获取任务详情失败:', error);
@@ -280,6 +367,14 @@ const MyTask = () => {
   };
 
   // 处理开始任务
+  useEffect(() => {
+    if (!targetTaskId) return;
+    handleDetailClick({ id: targetTaskId, ticketId: targetTaskId });
+    if (onTargetTaskHandled) {
+      onTargetTaskHandled();
+    }
+  }, [targetTaskId]);
+
   const handleStartSubmit = async (values) => {
     try {
       const taskId = selectedTask.ticketId || selectedTask.id;
@@ -595,10 +690,9 @@ const MyTask = () => {
   ];
 
   return (
-    <div
-      style={{ padding: 24, background: '#ffffffff'}}>
+    <div className="task-list-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2>我的任务</h2>
+        <h2>{title}</h2>
         <Button
           type="primary"
           icon={<SearchOutlined />}
@@ -615,7 +709,7 @@ const MyTask = () => {
 
       {/* 统计卡片 */}
       {stats && (
-        <Card style={{ marginBottom: 16 }}>
+        <Card className="task-stats-card" style={{ marginBottom: 16 }}>
           <Row gutter={16}>
             <Col span={4}>
               <Statistic title="总任务数" value={stats.total} />
@@ -645,7 +739,7 @@ const MyTask = () => {
       )}
 
       {/* 搜索和筛选区域 */}
-      <Card style={{ marginBottom: 16 }}>
+      <Card className="task-filter-card" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           <Col span={6}>
             <div style={{ marginBottom: 8 }}>状态筛选</div>
@@ -709,6 +803,7 @@ const MyTask = () => {
 
       {/* 任务表格 */}
           <Table
+            className="task-data-table"
             columns={columns}
             dataSource={filteredTasks}
             rowKey={(record) => record.ticketId || record.id || record.key || Math.random()}
@@ -789,6 +884,14 @@ const MyTask = () => {
               <Descriptions.Item label="问题描述">{selectedTask.description}</Descriptions.Item>
             </Descriptions>
 
+            <Button
+              style={{ marginBottom: 12 }}
+              loading={reportGenerating}
+              onClick={handleGenerateReport}
+            >
+              AI 生成维修报告
+            </Button>
+
             <Form.Item
               label="完成备注"
               name="notes"
@@ -865,6 +968,7 @@ const MyTask = () => {
         width={700}
       >
         {selectedTask && (
+          <>
           <Descriptions column={2} bordered>
             <Descriptions.Item label="任务ID" span={1}>
               {selectedTask.id}
@@ -1039,6 +1143,57 @@ const MyTask = () => {
               </Descriptions.Item>
             )}
           </Descriptions>
+          <Card
+            size="small"
+            title="推荐维修方案"
+            style={{ marginTop: 16, marginBottom: 16 }}
+          >
+            <Spin spinning={knowledgeLoading}>
+              {knowledgeRecommendations.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={knowledgeRecommendations}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={
+                          <Space wrap>
+                            <span>{item.title}</span>
+                            {item.estimatedMinutes && (
+                              <Tag color="blue">预计 {item.estimatedMinutes} 分钟</Tag>
+                            )}
+                          </Space>
+                        }
+                        description={
+                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            {item.solutionSteps && (
+                              <div style={{ whiteSpace: 'pre-wrap' }}>处理步骤：{item.solutionSteps}</div>
+                            )}
+                            {item.safetyNotes && (
+                              <Alert
+                                type="warning"
+                                showIcon
+                                message="安全注意"
+                                description={item.safetyNotes}
+                              />
+                            )}
+                          </Space>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <div style={{ color: '#64748b' }}>
+                  暂无匹配的知识库方案，可按现场情况处理并在完成后补充维修记录。
+                </div>
+              )}
+            </Spin>
+          </Card>
+          <RepairTimeline order={selectedTask} />
+          <RepairProcessRecords ticketId={selectedTask.ticketId || selectedTask.id} role="STAFF" editable />
+          <TicketComments ticketId={selectedTask.ticketId || selectedTask.id} role="STAFF" />
+          </>
         )}
       </Modal>
     </div>

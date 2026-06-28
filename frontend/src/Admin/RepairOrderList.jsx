@@ -1,17 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Table, Tag, Button, Space, Select, Input, 
-  Modal, Form, message, Card, Row, Col, Switch, Descriptions, Image, Spin
+  Modal, Form, message, Card, Row, Col, Switch, Descriptions, Image, Spin, Empty
 } from 'antd';
 import { 
   SearchOutlined, UserOutlined, CloseOutlined, CheckOutlined 
+  , ExclamationCircleOutlined, ClockCircleOutlined
 } from '@ant-design/icons';
-import { repairService, repairUtils } from '../Services/repairService';
+import { repairService, repairUtils } from '../services/repairService';
+import api from '../services/api';
+import RepairTimeline from '../components/RepairTimeline';
+import TicketComments from '../components/TicketComments';
+import RepairProcessRecords from '../components/RepairProcessRecords';
 
 const { Option } = Select;
 const { Search } = Input;
 
-const RepairOrderList = ({ onRefresh }) => {
+const RepairOrderList = ({ onRefresh, targetOrderId, onTargetOrderHandled }) => {
   const [repairOrders, setRepairOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
@@ -24,9 +29,16 @@ const RepairOrderList = ({ onRefresh }) => {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [repairmen, setRepairmen] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [slaOverview, setSlaOverview] = useState(null);
+  const [slaLoading, setSlaLoading] = useState(false);
+  const [slaFilter, setSlaFilter] = useState('all');
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState(null);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [assignForm] = Form.useForm();
   const [rejectForm] = Form.useForm();
 
@@ -72,6 +84,89 @@ const RepairOrderList = ({ onRefresh }) => {
     }
     return val;
   };
+
+  const formatHours = (hours) => {
+    const value = Number(hours || 0);
+    if (value >= 24) {
+      const days = Math.floor(value / 24);
+      const restHours = value % 24;
+      return restHours > 0 ? `${days}天${restHours}小时` : `${days}天`;
+    }
+    return `${value}小时`;
+  };
+
+  const getSlaInfo = (record) => {
+    const ticketId = String(record.ticketId || record.id || '');
+    if (!ticketId || !Array.isArray(slaOverview?.alertTickets)) {
+      return null;
+    }
+    return slaOverview.alertTickets.find(item => String(item.ticketId || item.id) === ticketId) || null;
+  };
+
+  const getSlaFilteredOrders = () => {
+    if (slaFilter === 'all') {
+      return repairOrders;
+    }
+    const alertTickets = Array.isArray(slaOverview?.alertTickets) ? slaOverview.alertTickets : [];
+    return alertTickets.filter(item => {
+      if (slaFilter === 'overdue') {
+        return item.slaStatus === 'OVERDUE';
+      }
+      if (slaFilter === 'overdue_accept') {
+        return item.slaStatus === 'OVERDUE' && item.slaType === 'ACCEPTANCE';
+      }
+      if (slaFilter === 'overdue_completion') {
+        return item.slaStatus === 'OVERDUE' && item.slaType === 'COMPLETION';
+      }
+      if (slaFilter === 'warning') {
+        return item.slaStatus === 'WARNING';
+      }
+      return true;
+    });
+  };
+
+  const renderSlaStatus = (record) => {
+    const slaInfo = getSlaInfo(record) || record;
+    if (!slaInfo?.slaStatus) {
+      const active = record.status === 'pending' || record.status === 'processing'
+        || record.status === 'WAITING_ACCEPT' || record.status === 'IN_PROGRESS';
+      return active ? <Tag color="green">SLA正常</Tag> : <Tag color="default">已结束</Tag>;
+    }
+
+    if (slaInfo.slaStatus === 'OVERDUE') {
+      return (
+        <Space direction="vertical" size={2}>
+          <Tag color="red" icon={<ExclamationCircleOutlined />}>已超时</Tag>
+          <span style={{ color: '#991b1b', fontSize: 12 }}>
+            {slaInfo.slaLabel || '处理时限'}超出 {formatHours(slaInfo.overdueHours)}
+          </span>
+        </Space>
+      );
+    }
+
+    return (
+      <Space direction="vertical" size={2}>
+        <Tag color="orange" icon={<ClockCircleOutlined />}>即将超时</Tag>
+        <span style={{ color: '#92400e', fontSize: 12 }}>
+          剩余 {formatHours(slaInfo.remainingHours)}
+        </span>
+      </Space>
+    );
+  };
+
+  const loadSlaOverview = async () => {
+    setSlaLoading(true);
+    try {
+      const data = await repairService.getSlaOverview();
+      setSlaOverview(data);
+    } catch (error) {
+      console.error('获取SLA预警失败:', error);
+      message.warning(`获取SLA预警失败：${error.message || '未知错误'}`);
+    } finally {
+      setSlaLoading(false);
+    }
+  };
+
   // 加载工单数据
   const loadRepairOrders = async (searchFilters = {}) => {
     setLoading(true);
@@ -204,12 +299,31 @@ const RepairOrderList = ({ onRefresh }) => {
   };
 
   // 打开分配模态框
-  const handleAssignClick = (order) => {
+  const handleAssignClick = async (order) => {
     setSelectedOrder(order);
     setAssignModalVisible(true);
+    setRecommendations([]);
     assignForm.setFieldsValue({
-      repairmanId: order.repairmanId || undefined,
+      repairmanId: order.repairmanId || order.staffId || undefined,
     });
+
+    const orderId = order.ticketId || order.id;
+    if (!orderId) {
+      message.warning('工单ID不存在，无法加载智能推荐');
+      return;
+    }
+
+    setRecommendLoading(true);
+    try {
+      const data = await repairService.getRecommendedRepairmen(orderId);
+      setRecommendations(data);
+    } catch (error) {
+      console.error('智能派单推荐加载失败:', error);
+      message.warning(`智能派单推荐加载失败：${error.message || '未知错误'}，可继续手动选择维修人员`);
+      setRecommendations([]);
+    } finally {
+      setRecommendLoading(false);
+    }
   };
 
   // 打开驳回模态框
@@ -230,6 +344,7 @@ const RepairOrderList = ({ onRefresh }) => {
         return;
       }
       const detail = await repairService.getRepairOrderById(id);
+      setAiSummary(null);
       setDetailData({
         ...detail,
         id: detail.ticketId || detail.id,
@@ -245,11 +360,22 @@ const RepairOrderList = ({ onRefresh }) => {
         createdAt: detail.createdAt || detail.created_at,
         assignedAt: detail.assignedAt || detail.assigned_at,
         completedAt: detail.completedAt || detail.completed_at,
+        closedAt: detail.closedAt || detail.closed_at,
         rejectionReason: detail.rejectionReason || detail.rejection_reason,
         repairNotes: detail.repairNotes || detail.repair_notes,
         studentName: detail.studentName || detail.student_name || '',
         repairmanName: detail.repairmanName || detail.staffName || detail.repairman_name || '',
+        ratingTime: detail.rating?.ratedAt || detail.ratingTime || null,
+        logs: detail.logs || [],
       });
+      setAiSummaryLoading(true);
+      api.ai.summarizeTicket(id)
+        .then((response) => setAiSummary(response?.data || null))
+        .catch((error) => {
+          console.warn('AI 工单摘要生成失败:', error);
+          setAiSummary(null);
+        })
+        .finally(() => setAiSummaryLoading(false));
     } catch (err) {
       console.error('获取工单详情失败:', err);
       message.error('获取工单详情失败');
@@ -258,6 +384,14 @@ const RepairOrderList = ({ onRefresh }) => {
       setDetailLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!targetOrderId) return;
+    handleViewDetail({ id: targetOrderId, ticketId: targetOrderId });
+    if (onTargetOrderHandled) {
+      onTargetOrderHandled();
+    }
+  }, [targetOrderId]);
 
   // 处理分配维修人员
   const handleAssignSubmit = async (values) => {
@@ -271,6 +405,7 @@ const RepairOrderList = ({ onRefresh }) => {
       message.success('工单分配成功');
       setAssignModalVisible(false);
       loadRepairOrders(); // 刷新数据
+      loadSlaOverview();
       
       // 通知父组件刷新
       if (onRefresh) {
@@ -289,6 +424,7 @@ const RepairOrderList = ({ onRefresh }) => {
       message.success('工单已驳回');
       setRejectModalVisible(false);
       loadRepairOrders(); // 刷新数据
+      loadSlaOverview();
       
       // 通知父组件刷新
       if (onRefresh) {
@@ -304,6 +440,7 @@ const RepairOrderList = ({ onRefresh }) => {
   useEffect(() => {
     loadRepairOrders();
     loadRepairmen();
+    loadSlaOverview();
   }, []);
 
   // 表格列定义
@@ -418,6 +555,12 @@ const RepairOrderList = ({ onRefresh }) => {
       },
     },
     {
+      title: 'SLA状态',
+      key: 'slaStatus',
+      width: 150,
+      render: (_, record) => renderSlaStatus(record),
+    },
+    {
       title: '维修人员',
       dataIndex: 'repairmanId',
       key: 'repairmanId',
@@ -528,9 +671,91 @@ const RepairOrderList = ({ onRefresh }) => {
     },
   ];
 
+  const displayedRepairOrders = getSlaFilteredOrders();
+
   return (
     <div>
       <h2>工单管理</h2>
+
+      <Card
+        title="SLA 超时预警"
+        loading={slaLoading}
+        style={{ marginBottom: 16 }}
+        extra={
+          <Button size="small" onClick={loadSlaOverview}>
+            刷新预警
+          </Button>
+        }
+      >
+        <Row gutter={[12, 12]}>
+          <Col xs={24} sm={12} md={6}>
+            <Card
+              size="small"
+              hoverable
+              onClick={() => setSlaFilter('all')}
+              style={{ borderColor: slaFilter === 'all' ? '#1677ff' : '#e5e7eb' }}
+            >
+              <div style={{ color: '#64748b' }}>待监控工单</div>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>{slaOverview?.activeCount || 0}</div>
+              <div style={{ color: '#64748b' }}>当前待受理和处理中</div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card
+              size="small"
+              hoverable
+              onClick={() => setSlaFilter('overdue_accept')}
+              style={{ borderColor: slaFilter === 'overdue_accept' ? '#dc2626' : '#e5e7eb' }}
+            >
+              <div style={{ color: '#991b1b' }}>超时未受理</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#dc2626' }}>
+                {slaOverview?.overdueAcceptCount || 0}
+              </div>
+              <div style={{ color: '#64748b' }}>超过响应时限</div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card
+              size="small"
+              hoverable
+              onClick={() => setSlaFilter('overdue_completion')}
+              style={{ borderColor: slaFilter === 'overdue_completion' ? '#dc2626' : '#e5e7eb' }}
+            >
+              <div style={{ color: '#991b1b' }}>超时未完成</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#dc2626' }}>
+                {slaOverview?.overdueCompletionCount || 0}
+              </div>
+              <div style={{ color: '#64748b' }}>超过完成时限</div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card
+              size="small"
+              hoverable
+              onClick={() => setSlaFilter('warning')}
+              style={{ borderColor: slaFilter === 'warning' ? '#f59e0b' : '#e5e7eb' }}
+            >
+              <div style={{ color: '#92400e' }}>即将超时</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>
+                {slaOverview?.warningCount || 0}
+              </div>
+              <div style={{ color: '#64748b' }}>进入时限预警区间</div>
+            </Card>
+          </Col>
+        </Row>
+        <div style={{ marginTop: 12 }}>
+          <Space wrap>
+            <span style={{ color: '#64748b' }}>
+              超时率：{slaOverview?.overdueRate || 0}%
+            </span>
+            {slaFilter !== 'all' && (
+              <Button size="small" onClick={() => setSlaFilter('all')}>
+                返回全部工单
+              </Button>
+            )}
+          </Space>
+        </div>
+      </Card>
       
       {/* 搜索和筛选区域 */}
       <Card style={{ marginBottom: 16 }}>
@@ -604,7 +829,7 @@ const RepairOrderList = ({ onRefresh }) => {
       {/* 工单表格 */}
       <Table
         columns={columns}
-        dataSource={repairOrders}
+        dataSource={displayedRepairOrders}
         rowKey={(record) => record.ticketId || record.id || Math.random()}
         loading={loading}
         pagination={{
@@ -621,7 +846,11 @@ const RepairOrderList = ({ onRefresh }) => {
       <Modal
         title="分配维修人员"
         open={assignModalVisible}
-        onCancel={() => setAssignModalVisible(false)}
+        width={760}
+        onCancel={() => {
+          setAssignModalVisible(false);
+          setRecommendations([]);
+        }}
         footer={null}
       >
         <Form
@@ -629,6 +858,58 @@ const RepairOrderList = ({ onRefresh }) => {
           layout="vertical"
           onFinish={handleAssignSubmit}
         >
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontWeight: 600 }}>智能派单推荐</span>
+              <Tag color="blue">智能推荐</Tag>
+            </div>
+
+            <Spin spinning={recommendLoading}>
+              {recommendations.length > 0 ? (
+                <Row gutter={[12, 12]}>
+                  {recommendations.slice(0, 3).map((item, index) => (
+                    <Col span={24} key={item.staffId}>
+                      <div
+                        style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: 8,
+                          padding: 12,
+                          background: index === 0 ? '#f0f7ff' : '#fff',
+                        }}
+                      >
+                        <Row align="middle" gutter={[12, 8]}>
+                          <Col flex="auto">
+                            <Space wrap>
+                              <Tag color={index === 0 ? 'gold' : 'default'}>推荐{index + 1}</Tag>
+                              <UserOutlined />
+                              <strong>{item.staffName}</strong>
+                              <Tag color="green">评分 {item.score}</Tag>
+                              <Tag>待办 {item.activeTaskCount} 单</Tag>
+                              <Tag>同类 {item.sameCategoryCompletedCount} 单</Tag>
+                            </Space>
+                            <div style={{ color: '#64748b', marginTop: 8, lineHeight: 1.6 }}>
+                              {item.reason}
+                            </div>
+                          </Col>
+                          <Col>
+                            <Button
+                              type={index === 0 ? 'primary' : 'default'}
+                              onClick={() => assignForm.setFieldsValue({ repairmanId: item.staffId })}
+                            >
+                              选择
+                            </Button>
+                          </Col>
+                        </Row>
+                      </div>
+                    </Col>
+                  ))}
+                </Row>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无推荐结果，可手动选择维修人员" />
+              )}
+            </Spin>
+          </div>
+
           <Form.Item
             label="选择维修人员"
             name="repairmanId"
@@ -753,6 +1034,20 @@ const RepairOrderList = ({ onRefresh }) => {
             </Descriptions.Item>
           </Descriptions>
 
+          <Card
+            size="small"
+            title="AI 工单摘要"
+            loading={aiSummaryLoading}
+            style={{ marginBottom: 16 }}
+            extra={aiSummary?.source ? <Tag color="blue">{aiSummary.source}</Tag> : null}
+          >
+            {aiSummary?.summary ? (
+              <div style={{ lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{aiSummary.summary}</div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无摘要" />
+            )}
+          </Card>
+
           <Descriptions
             title="人员信息"
             bordered
@@ -795,6 +1090,10 @@ const RepairOrderList = ({ onRefresh }) => {
               </Descriptions.Item>
             )}
           </Descriptions>
+
+          <RepairTimeline order={detailData} />
+          <RepairProcessRecords ticketId={detailData.ticketId || detailData.id} role="ADMIN" />
+          <TicketComments ticketId={detailData.ticketId || detailData.id} role="ADMIN" />
 
           <div style={{ marginBottom: 16 }}>
             <h4 style={{ marginBottom: 12 }}>现场照片</h4>

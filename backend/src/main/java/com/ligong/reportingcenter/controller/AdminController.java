@@ -9,6 +9,7 @@ import com.ligong.reportingcenter.service.UserService;
 import com.ligong.reportingcenter.service.TicketService;
 import com.ligong.reportingcenter.service.RatingService;
 import com.ligong.reportingcenter.service.CategoryService;
+import com.ligong.reportingcenter.service.AuditLogService;
 import com.ligong.reportingcenter.domain.enums.TicketStatus;
 import com.ligong.reportingcenter.exception.BusinessException;
 import java.util.List;
@@ -41,6 +42,7 @@ public class AdminController {
     private final TicketService ticketService;
     private final RatingService ratingService;
     private final CategoryService categoryService;
+    private final AuditLogService auditLogService;
 
     // 用户管理
     @GetMapping("/users")
@@ -63,13 +65,17 @@ public class AdminController {
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public UserDto createUser(@RequestBody UserRegisterRequest request) {
-        return userService.register(request);
+        UserDto user = userService.register(request);
+        auditLogService.record("用户管理", "新增用户", "USER", user.userId(), "新增用户：" + user.nickname());
+        return user;
     }
 
     @PutMapping("/users/{userId}")
     @PreAuthorize("hasRole('ADMIN')")
     public UserDto updateUser(@PathVariable("userId") String userId, @RequestBody UserRegisterRequest request) {
-        return userService.updateUser(userId, request);
+        UserDto user = userService.updateUser(userId, request);
+        auditLogService.record("用户管理", "更新用户", "USER", userId, "更新用户：" + user.nickname());
+        return user;
     }
 
     @DeleteMapping("/users/{userId}")
@@ -77,6 +83,7 @@ public class AdminController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteUser(@PathVariable("userId") String userId) {
         userService.deactivate(userId);
+        auditLogService.record("用户管理", "禁用用户", "USER", userId, "禁用用户：" + userId);
     }
 
     // 评价管理
@@ -109,9 +116,10 @@ public class AdminController {
     @DeleteMapping("/feedbacks/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteFeedback(@PathVariable Long id) {
+    public void deleteFeedback(@PathVariable("id") Long id) {
         log.info("管理员请求删除评价: id={}", id);
         ratingService.delete(id);
+        auditLogService.record("评价管理", "删除评价", "FEEDBACK", String.valueOf(id), "删除评价记录：" + id);
     }
 
     // 数据统计
@@ -217,6 +225,30 @@ public class AdminController {
         return result;
     }
 
+    @GetMapping("/stats/sla")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> getSlaOverview() {
+        Map<String, Object> slaOverview = ticketService.getSlaOverview();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", slaOverview);
+        return result;
+    }
+
+    @GetMapping("/stats/hotspot")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> getHotspotAnalysis() {
+        Map<String, Object> hotspotAnalysis = ticketService.getHotspotAnalysis();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取成功");
+        result.put("data", hotspotAnalysis);
+        return result;
+    }
+
     // 新增方法：重置用户密码
     @PostMapping("/users/{userId}/reset-password")
     @PreAuthorize("hasRole('ADMIN')")
@@ -227,6 +259,7 @@ public class AdminController {
             response.put("message", "密码重置成功");
             response.put("userId", result.getUserId());
             response.put("newPassword", result.getNewPassword());
+            auditLogService.record("用户管理", "重置密码", "USER", userId, "重置用户密码：" + userId);
             return ResponseEntity.ok(response);
         } catch (BusinessException e) {
             Map<String, Object> response = new HashMap<>();

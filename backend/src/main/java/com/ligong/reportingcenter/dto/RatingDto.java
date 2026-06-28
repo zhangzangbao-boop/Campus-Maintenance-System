@@ -11,6 +11,11 @@ public record RatingDto(
     String staffId,
     String staffName,    // 新增：维修人员姓名
     Long repairOrderId,  // 新增：报修单ID
+    Integer speedRating,
+    Integer qualityRating,
+    Integer attitudeRating,
+    Boolean resolved,
+    Boolean anonymous,
     LocalDateTime ratedAt
 ) {
 }

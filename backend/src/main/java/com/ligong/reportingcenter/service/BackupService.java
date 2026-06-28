@@ -16,6 +16,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -165,6 +166,13 @@ public class BackupService {
             
             if (!Files.exists(backupFile)) {
                 throw new BusinessException("备份文件不存在: " + fileName);
+            }
+
+            try {
+                BackupDto safetyBackup = performBackup();
+                log.info("恢复前已创建保护备份: {}", safetyBackup.fileName());
+            } catch (Exception e) {
+                throw new BusinessException("恢复前创建保护备份失败，已取消恢复操作: " + e.getMessage());
             }
 
             String host = extractHost(datasourceUrl);
@@ -321,6 +329,16 @@ public class BackupService {
         } catch (Exception e) {
             log.warn("清理旧备份时发生错误", e);
         }
+    }
+
+    public Map<String, Object> getBackupStatus() {
+        Map<String, Object> status = new java.util.LinkedHashMap<>();
+        status.put("directory", Paths.get(backupDirectory).toAbsolutePath().normalize().toString());
+        status.put("retentionDays", retentionDays);
+        status.put("backupCount", listBackups().size());
+        status.put("database", DB_NAME);
+        status.put("mysqldumpRequired", true);
+        return status;
     }
 
     /**

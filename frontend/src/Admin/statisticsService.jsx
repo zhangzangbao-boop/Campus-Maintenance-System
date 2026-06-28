@@ -304,4 +304,90 @@ export const statisticsService = {
       return [];
     }
   },
+
+  // 新增：获取热点问题分析
+  getHotspotAnalysis: async () => {
+    try {
+      console.log('========================================');
+      console.log('开始获取热点问题分析...');
+      console.log('========================================');
+
+      const data = await handleApiResponse(() => api.admin.getStatsHotspot());
+      console.log('热点问题分析原始数据:', data);
+
+      return {
+        hotAreas: Array.isArray(data?.hotAreas) ? data.hotAreas.map(item => ({
+          area: item.area || '未知区域',
+          totalTickets: Number(item.totalTickets || 0),
+          activeTickets: Number(item.activeTickets || 0),
+        })) : [],
+        categoryGrowth: Array.isArray(data?.categoryGrowth) ? data.categoryGrowth.map(item => ({
+          category: item.category || '未分类',
+          recentCount: Number(item.recentCount || 0),
+          previousCount: Number(item.previousCount || 0),
+          growth: Number(item.growth || 0),
+          growthRate: Number(item.growthRate || 0),
+        })) : [],
+        repeatedLocations: Array.isArray(data?.repeatedLocations) ? data.repeatedLocations.map(item => ({
+          location: item.location || '未知位置',
+          category: item.category || '未分类',
+          totalTickets: Number(item.totalTickets || 0),
+          activeTickets: Number(item.activeTickets || 0),
+          lastCreatedAt: item.lastCreatedAt || null,
+        })) : [],
+        staffWorkload: Array.isArray(data?.staffWorkload) ? data.staffWorkload.map(item => ({
+          staffId: item.staffId || '',
+          staffName: item.staffName || '未知维修员',
+          totalAssigned: Number(item.totalAssigned || 0),
+          activeTickets: Number(item.activeTickets || 0),
+          completedTickets: Number(item.completedTickets || 0),
+        })) : [],
+        categoryProcessingTime: Array.isArray(data?.categoryProcessingTime) ? data.categoryProcessingTime.map(item => ({
+          category: item.category || '未分类',
+          completedTickets: Number(item.completedTickets || 0),
+          avgHours: Number(item.avgHours || 0),
+          displayText: item.displayText || '暂无数据',
+        })) : [],
+        generatedAt: data?.generatedAt || null,
+      };
+    } catch (error) {
+      console.error('========================================');
+      console.error('获取热点问题分析失败:', error);
+      console.error('========================================');
+      return {
+        hotAreas: [],
+        categoryGrowth: [],
+        repeatedLocations: [],
+        staffWorkload: [],
+        categoryProcessingTime: [],
+        generatedAt: null,
+      };
+    }
+  },
+
+  // 新增：获取校园设施健康指数
+  getFacilityHealth: async () => {
+    try {
+      console.log('开始获取校园设施健康指数...');
+      const data = await handleApiResponse(() => api.admin.getStatsFacilityHealth());
+      return {
+        overallHealthScore: Number(data?.overallHealthScore || 100),
+        overallRiskLevel: data?.overallRiskLevel || '健康',
+        areaHealth: Array.isArray(data?.areaHealth) ? data.areaHealth : [],
+        categoryRisk: Array.isArray(data?.categoryRisk) ? data.categoryRisk : [],
+        suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
+        generatedAt: data?.generatedAt || null,
+      };
+    } catch (error) {
+      console.error('获取校园设施健康指数失败:', error);
+      return {
+        overallHealthScore: 100,
+        overallRiskLevel: '健康',
+        areaHealth: [],
+        categoryRisk: [],
+        suggestions: [],
+        generatedAt: null,
+      };
+    }
+  },
 };

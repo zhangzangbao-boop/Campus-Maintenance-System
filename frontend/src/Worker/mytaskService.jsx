@@ -150,6 +150,7 @@ export const mytaskService = {
           created_at: task.createdAt || task.created_at,
           assigned_at: task.assignedAt || task.assigned_at,
           completed_at: task.completedAt || task.completed_at,
+          closedAt: task.closedAt || task.closed_at,
           // 学生信息（便于详情展示）
           studentID: task.studentId || task.studentID,
           studentId: task.studentId || task.studentID,
@@ -160,6 +161,8 @@ export const mytaskService = {
           // 评价信息：从后端 RatingDto 中提取评分和评论
           rating: task.rating?.score ?? task.rating ?? null,
           feedback: task.rating?.comment ?? task.feedback ?? '',
+          ratingTime: task.rating?.ratedAt || task.ratingTime || null,
+          logs: task.logs || [],
           // 图片：从 TicketImageDto 列表中提取 imageUrl
           images: Array.isArray(task.images)
             ? task.images

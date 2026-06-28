@@ -5,6 +5,13 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `repair_feedback`;
 DROP TABLE IF EXISTS `repair_order_image`;
 DROP TABLE IF EXISTS `repair_order_status_log`;
+DROP TABLE IF EXISTS `repair_order_comment`;
+DROP TABLE IF EXISTS `repair_process_record`;
+DROP TABLE IF EXISTS `sys_notification`;
+DROP TABLE IF EXISTS `ai_ticket_analysis`;
+DROP TABLE IF EXISTS `repair_knowledge_base`;
+DROP TABLE IF EXISTS `sys_system_config`;
+DROP TABLE IF EXISTS `sys_audit_log`;
 DROP TABLE IF EXISTS `repair_order`;
 DROP TABLE IF EXISTS `repair_category`;
 DROP TABLE IF EXISTS `sys_user`;
@@ -78,10 +85,125 @@ CREATE TABLE `repair_feedback` (
     `repairman_id` VARCHAR(255) NOT NULL,
     `rating` INT NOT NULL CHECK (`rating` >= 1 AND `rating` <= 5),
     `comment` TEXT,
+    `speed_rating` INT CHECK (`speed_rating` IS NULL OR (`speed_rating` >= 1 AND `speed_rating` <= 5)),
+    `quality_rating` INT CHECK (`quality_rating` IS NULL OR (`quality_rating` >= 1 AND `quality_rating` <= 5)),
+    `attitude_rating` INT CHECK (`attitude_rating` IS NULL OR (`attitude_rating` >= 1 AND `attitude_rating` <= 5)),
+    `resolved` BOOLEAN DEFAULT TRUE,
+    `anonymous` BOOLEAN DEFAULT FALSE,
     `created_at` DATETIME NOT NULL,
     FOREIGN KEY (`repair_order_id`) REFERENCES `repair_order`(`id`),
     FOREIGN KEY (`student_number`) REFERENCES `sys_user`(`user_number`),
     FOREIGN KEY (`repairman_id`) REFERENCES `sys_user`(`user_number`)
+);
+
+CREATE TABLE `repair_order_comment` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `repair_order_id` BIGINT NOT NULL,
+    `user_number` VARCHAR(255) NOT NULL,
+    `content` TEXT NOT NULL,
+    `image_url` VARCHAR(500),
+    `comment_type` VARCHAR(30) NOT NULL,
+    `created_at` DATETIME NOT NULL,
+    FOREIGN KEY (`repair_order_id`) REFERENCES `repair_order`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_number`) REFERENCES `sys_user`(`user_number`),
+    INDEX `idx_repair_order_comment_order` (`repair_order_id`),
+    INDEX `idx_repair_order_comment_user` (`user_number`),
+    INDEX `idx_repair_order_comment_type` (`comment_type`),
+    INDEX `idx_repair_order_comment_created_at` (`created_at`)
+);
+
+CREATE TABLE `repair_process_record` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `repair_order_id` BIGINT NOT NULL,
+    `staff_id` VARCHAR(255) NOT NULL,
+    `action_type` VARCHAR(30) NOT NULL,
+    `content` TEXT NOT NULL,
+    `image_url` VARCHAR(500),
+    `created_at` DATETIME NOT NULL,
+    FOREIGN KEY (`repair_order_id`) REFERENCES `repair_order`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`staff_id`) REFERENCES `sys_user`(`user_number`),
+    INDEX `idx_repair_process_order` (`repair_order_id`),
+    INDEX `idx_repair_process_staff` (`staff_id`),
+    INDEX `idx_repair_process_action` (`action_type`),
+    INDEX `idx_repair_process_created_at` (`created_at`)
+);
+
+CREATE TABLE `sys_notification` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `receiver_id` VARCHAR(255) NOT NULL,
+    `title` VARCHAR(100) NOT NULL,
+    `content` TEXT NOT NULL,
+    `related_order_id` BIGINT,
+    `read_flag` BOOLEAN NOT NULL DEFAULT FALSE,
+    `created_at` DATETIME NOT NULL,
+    FOREIGN KEY (`receiver_id`) REFERENCES `sys_user`(`user_number`) ON DELETE CASCADE,
+    FOREIGN KEY (`related_order_id`) REFERENCES `repair_order`(`id`) ON DELETE CASCADE,
+    INDEX `idx_notification_receiver` (`receiver_id`),
+    INDEX `idx_notification_read` (`read_flag`),
+    INDEX `idx_notification_created_at` (`created_at`)
+);
+
+CREATE TABLE `sys_audit_log` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `actor_id` VARCHAR(255),
+    `action` VARCHAR(80) NOT NULL,
+    `module` VARCHAR(80) NOT NULL,
+    `target_type` VARCHAR(80),
+    `target_id` VARCHAR(120),
+    `detail` TEXT,
+    `request_method` VARCHAR(20),
+    `request_path` VARCHAR(500),
+    `success` BOOLEAN NOT NULL DEFAULT TRUE,
+    `ip_address` VARCHAR(80),
+    `created_at` DATETIME NOT NULL,
+    FOREIGN KEY (`actor_id`) REFERENCES `sys_user`(`user_number`) ON DELETE SET NULL,
+    INDEX `idx_audit_actor` (`actor_id`),
+    INDEX `idx_audit_module` (`module`),
+    INDEX `idx_audit_action` (`action`),
+    INDEX `idx_audit_created_at` (`created_at`)
+);
+
+CREATE TABLE `sys_system_config` (
+    `config_key` VARCHAR(100) PRIMARY KEY,
+    `config_value` TEXT,
+    `description` VARCHAR(500),
+    `updated_by` VARCHAR(255),
+    `created_at` DATETIME NOT NULL,
+    `updated_at` DATETIME NOT NULL,
+    FOREIGN KEY (`updated_by`) REFERENCES `sys_user`(`user_number`) ON DELETE SET NULL
+);
+
+CREATE TABLE `repair_knowledge_base` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `category_key` VARCHAR(50),
+    `title` VARCHAR(200) NOT NULL,
+    `symptom_keywords` TEXT,
+    `solution_steps` TEXT,
+    `safety_notes` TEXT,
+    `estimated_minutes` INT,
+    `enabled` BOOLEAN NOT NULL DEFAULT TRUE,
+    `created_at` DATETIME NOT NULL,
+    `updated_at` DATETIME NOT NULL,
+    FOREIGN KEY (`category_key`) REFERENCES `repair_category`(`category_key`) ON DELETE SET NULL,
+    INDEX `idx_knowledge_category` (`category_key`),
+    INDEX `idx_knowledge_enabled` (`enabled`)
+);
+
+CREATE TABLE `ai_ticket_analysis` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `source_text` TEXT,
+    `title` VARCHAR(200),
+    `category_key` VARCHAR(50),
+    `location_text` VARCHAR(200),
+    `priority` VARCHAR(20),
+    `summary` TEXT,
+    `safety_tips` TEXT,
+    `provider` VARCHAR(80),
+    `model` VARCHAR(120),
+    `raw_response` TEXT,
+    `created_at` DATETIME NOT NULL,
+    INDEX `idx_ai_analysis_category` (`category_key`),
+    INDEX `idx_ai_analysis_created_at` (`created_at`)
 );
 
 -- 插入初始数据（如果已存在则忽略，避免重复插入错误）
@@ -94,14 +216,43 @@ INSERT IGNORE INTO `repair_category` (`category_key`) VALUES
 
 -- 插入初始用户数据（如果已存在则忽略，避免重复插入错误）
 INSERT IGNORE INTO `sys_user` (`user_number`, `name`, `password`, `role`, `enabled`, `phone`, `created_at`) VALUES
-('admin', '管理员', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'ADMIN', TRUE, '13800000000', NOW()),
-('worker001', '维修员张三', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STAFF', TRUE, '13800000001', NOW()),
-('worker002', '维修员李四', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STAFF', TRUE, '13800000002', NOW()),
-('20210001', '学生王五', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STUDENT', TRUE, '13800000003', NOW()),
-('20210002', '学生赵六', '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG', 'STUDENT', TRUE, '13800000004', NOW());
+('admin', '管理员', '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2', 'ADMIN', TRUE, '13800000000', NOW()),
+('worker001', '维修员张三', '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2', 'STAFF', TRUE, '13800000001', NOW()),
+('worker002', '维修员李四', '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2', 'STAFF', TRUE, '13800000002', NOW()),
+('20260001', '学生王五', '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2', 'STUDENT', TRUE, '13800000003', NOW()),
+('20260002', '学生赵六', '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2', 'STUDENT', TRUE, '13800000004', NOW());
 
--- 如果需要重置所有测试用户的密码为041206，可以取消下面语句的注释
--- UPDATE `sys_user` SET `password` = '$2a$10$w9ziBssO/.lfsyOhdZRjzerP/Qhl3NryE/F9dmTGVGAhF2Vc7t/RG';
+-- 如果需要重置所有测试用户的密码为123456，可以取消下面语句的注释
+-- UPDATE `sys_user` SET `password` = '$2a$10$BnD773cRGP0RgVgCWfk2aOnE26elWpSZBjNLz/GNV7hghhopQ7xu2';
+
+INSERT IGNORE INTO `sys_system_config`
+    (`config_key`, `config_value`, `description`, `updated_by`, `created_at`, `updated_at`)
+VALUES
+    ('ai.enabled', 'false', '是否启用外部大模型。未启用时系统使用本地规则引擎。', 'admin', NOW(), NOW()),
+    ('ai.provider', 'deepseek', '大模型供应商配置。', 'admin', NOW(), NOW()),
+    ('ai.model', 'deepseek-v4-flash', '默认大模型名称。', 'admin', NOW(), NOW()),
+    ('ai.base-url', 'https://api.deepseek.com', 'DeepSeek OpenAI-Compatible API Base URL。', 'admin', NOW(), NOW()),
+    ('ai.api-key', '', 'DeepSeek API Key。建议只在本地后台配置。', 'admin', NOW(), NOW()),
+    ('ai.timeout-seconds', '20', '大模型接口超时时间，单位秒。', 'admin', NOW(), NOW()),
+    ('ai.thinking.enabled', 'false', '是否启用模型思考模式。', 'admin', NOW(), NOW()),
+    ('upload.max-image-count', '5', '单个工单最多上传图片数量。', 'admin', NOW(), NOW()),
+    ('upload.max-image-size-mb', '5', '单张图片大小上限，单位 MB。', 'admin', NOW(), NOW()),
+    ('backup.auto-enabled', 'false', '是否启用定时数据库备份。', 'admin', NOW(), NOW()),
+    ('backup.cron', '0 30 2 * * ?', '定时备份 Cron 表达式，默认每天凌晨 2:30。', 'admin', NOW(), NOW()),
+    ('backup.retention-days', '30', '备份文件保留天数。', 'admin', NOW(), NOW()),
+    ('sla.high.responseHours', '2', '高优先级受理时限。', 'admin', NOW(), NOW()),
+    ('sla.high.completionHours', '24', '高优先级完成时限。', 'admin', NOW(), NOW()),
+    ('sla.medium.responseHours', '8', '中优先级受理时限。', 'admin', NOW(), NOW()),
+    ('sla.medium.completionHours', '72', '中优先级完成时限。', 'admin', NOW(), NOW()),
+    ('sla.low.responseHours', '24', '低优先级受理时限。', 'admin', NOW(), NOW()),
+    ('sla.low.completionHours', '168', '低优先级完成时限。', 'admin', NOW(), NOW());
+
+INSERT IGNORE INTO `repair_knowledge_base`
+    (`category_key`, `title`, `symptom_keywords`, `solution_steps`, `safety_notes`, `estimated_minutes`, `enabled`, `created_at`, `updated_at`)
+VALUES
+    ('水电维修', '宿舍水管漏水应急处理', '漏水,滴水,水管,水龙头,积水', '关闭阀门，检查接口和阀芯，更换损坏配件，完成通水测试。', '地面有积水时先做防滑提示，疑似水电混合时必须断电后处理。', 45, TRUE, NOW(), NOW()),
+    ('网络故障', '宿舍网口接触不良处理', '网络,网口,断线,无法连接,水晶头', '检测端口，重新压接水晶头或更换网线，重启 AP/端口并现场测试。', '不要随意拔插弱电间核心设备，必要时联系网络中心确认。', 40, TRUE, NOW(), NOW()),
+    ('电器故障', '照明灯频闪与镇流器更换', '照明,灯,频闪,镇流器,灯管', '断电验电，检查灯管和镇流器，更换匹配配件并通电测试。', '必须断电操作，登高作业需要扶梯稳定。', 60, TRUE, NOW(), NOW());
 
 -- ==========================================================
 -- 视图定义：用于简化统计与报表查询

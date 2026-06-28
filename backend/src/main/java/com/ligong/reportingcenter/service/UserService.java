@@ -4,6 +4,7 @@ import com.ligong.reportingcenter.domain.entity.User;
 import com.ligong.reportingcenter.domain.enums.UserRole;
 import com.ligong.reportingcenter.dto.ResetPasswordResult;
 import com.ligong.reportingcenter.dto.UserDto;
+import com.ligong.reportingcenter.dto.request.ChangePasswordRequest;
 import com.ligong.reportingcenter.dto.request.LoginRequest;
 import com.ligong.reportingcenter.dto.request.UserRegisterRequest;
 import com.ligong.reportingcenter.dto.request.UserUpdateRequest;
@@ -132,7 +133,7 @@ public class UserService implements UserDetailsService {
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUserId(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("用户不存在：" + username));
         
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getUserId())
@@ -160,6 +161,20 @@ public class UserService implements UserDetailsService {
         return findById(userId);
     }
     
+    @Transactional
+    public void changePassword(String userId, ChangePasswordRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "用户不存在"));
+        if (!passwordEncoder.matches(request.oldPassword(), user.getPasswordHash())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "原密码不正确");
+        }
+        if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "新密码不能与原密码相同");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
+    }
+
     @Transactional
     public UserDto updateUserInfo(String userId, UserUpdateRequest request) {
         User user = userRepository.findById(userId)

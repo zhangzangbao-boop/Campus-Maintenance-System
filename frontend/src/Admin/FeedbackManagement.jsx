@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Rate, Button, Space, Tag,List, Popconfirm, Statistic, Row, Col } from 'antd';
+import { Card, Rate, Button, Space, Tag, Popconfirm, Statistic, Row, Col } from 'antd';
 import { DeleteOutlined, UserOutlined, StarOutlined, MessageOutlined } from '@ant-design/icons';
 import { feedbackService } from './feedbackService';
 
@@ -58,15 +58,6 @@ const FeedbackManagement = () => {
     const repairmanName = feedback.repairmanName || '未知维修工';
     const studentName = feedback.studentName || feedback.studentId || '未知学生';
 
-    console.log('评价卡片数据:', {
-      id: feedback.id,
-      repairmanId: feedback.repairmanId,
-      repairmanName: repairmanName,
-      studentId: feedback.studentId,
-      studentName: studentName,
-      repairOrderId: feedback.repairOrderId
-    });
-
     // 根据评分设置标签颜色
     const getRatingTagColor = (rating) => {
       if (rating >= 4) return 'green';
@@ -94,6 +85,12 @@ const FeedbackManagement = () => {
               <Space>
                 <span style={{ fontWeight: 'bold' }}>评价 #{feedback.id}</span>
                 <Tag color="blue">报修单: {feedback.repairOrderId || '未知'}</Tag>
+                {feedback.anonymous && <Tag color="purple">匿名展示</Tag>}
+                {feedback.resolved !== undefined && feedback.resolved !== null && (
+                  <Tag color={feedback.resolved ? 'green' : 'red'}>
+                    {feedback.resolved ? '已解决' : '未彻底解决'}
+                  </Tag>
+                )}
               </Space>
               <Tag color={getRatingTagColor(feedback.rating)}>
                 {feedback.rating}星
@@ -105,11 +102,19 @@ const FeedbackManagement = () => {
               <Rate disabled value={feedback.rating} />
             </div>
 
+            {(feedback.speedRating || feedback.qualityRating || feedback.attitudeRating) && (
+              <Space wrap style={{ marginBottom: 8 }}>
+                {feedback.speedRating && <Tag>速度 {feedback.speedRating} 星</Tag>}
+                {feedback.qualityRating && <Tag>质量 {feedback.qualityRating} 星</Tag>}
+                {feedback.attitudeRating && <Tag>态度 {feedback.attitudeRating} 星</Tag>}
+              </Space>
+            )}
+
             {/* 参与方信息 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <UserOutlined style={{ marginRight: 4 }} />
-                <strong>评价人:</strong> {studentName}
+                <strong>评价人:</strong> {feedback.anonymous ? '匿名学生' : studentName}
               </div>
               <div>
                 <UserOutlined style={{ marginRight: 4 }} />

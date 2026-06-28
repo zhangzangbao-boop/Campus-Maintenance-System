@@ -48,6 +48,27 @@ public class Rating {
     @Column(name = "comment", columnDefinition = "TEXT") // 保持列名
     private String comment;
 
+    @Min(1)
+    @Max(5)
+    @Column(name = "speed_rating")
+    private Integer speedRating;
+
+    @Min(1)
+    @Max(5)
+    @Column(name = "quality_rating")
+    private Integer qualityRating;
+
+    @Min(1)
+    @Max(5)
+    @Column(name = "attitude_rating")
+    private Integer attitudeRating;
+
+    @Column(name = "resolved")
+    private Boolean resolved;
+
+    @Column(name = "anonymous")
+    private Boolean anonymous;
+
     @Column(name = "created_at", nullable = false) // 修改列名
     private LocalDateTime ratedAt;
 

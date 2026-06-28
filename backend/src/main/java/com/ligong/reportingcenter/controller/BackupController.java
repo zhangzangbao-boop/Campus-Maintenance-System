@@ -3,6 +3,7 @@ package com.ligong.reportingcenter.controller;
 import com.ligong.reportingcenter.dto.BackupDto;
 import com.ligong.reportingcenter.service.BackupService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/backup")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
+@Slf4j
 public class BackupController {
 
     private final BackupService backupService;
@@ -59,6 +61,15 @@ public class BackupController {
         }
     }
 
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> backupStatus() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "获取备份状态成功");
+        result.put("data", backupService.getBackupStatus());
+        return ResponseEntity.ok(result);
+    }
+
     /**
      * 恢复数据库
      */
@@ -92,10 +103,7 @@ public class BackupController {
     @DeleteMapping("/{fileName}")
     public ResponseEntity<Map<String, Object>> deleteBackup(@PathVariable("fileName") String fileName) {
         try {
-            System.out.println("收到删除备份请求，文件名: " + fileName);
-
             if (fileName == null || fileName.trim().isEmpty()) {
-                System.out.println("文件名为空，拒绝删除");
                 Map<String, Object> result = new HashMap<>();
                 result.put("code", 400);
                 result.put("message", "文件名不能为空");
@@ -103,7 +111,6 @@ public class BackupController {
             }
 
             backupService.deleteBackup(fileName.trim());
-            System.out.println("删除备份成功: " + fileName);
 
             Map<String, Object> result = new HashMap<>();
             result.put("code", 200);
@@ -111,8 +118,7 @@ public class BackupController {
             result.put("fileName", fileName);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            System.out.println("删除备份失败: " + fileName + ", 错误: " + e.getMessage());
-            e.printStackTrace();
+            log.warn("删除备份失败: {}", fileName, e);
 
             Map<String, Object> result = new HashMap<>();
             result.put("code", 500);

@@ -1,13 +1,18 @@
 package com.ligong.reportingcenter.controller;
 
 import com.ligong.reportingcenter.domain.enums.TicketStatus;
+import com.ligong.reportingcenter.domain.enums.RepairProcessActionType;
+import com.ligong.reportingcenter.dto.RepairProcessRecordDto;
+import com.ligong.reportingcenter.dto.StaffRecommendationDto;
 import com.ligong.reportingcenter.dto.TicketDetailDto;
 import com.ligong.reportingcenter.dto.TicketSummaryDto;
+import com.ligong.reportingcenter.dto.request.RepairProcessRecordRequest;
 import com.ligong.reportingcenter.dto.request.TicketAssignRequest;
 import com.ligong.reportingcenter.dto.request.TicketCreateRequest;
 import com.ligong.reportingcenter.dto.request.TicketRatingRequest;
 import com.ligong.reportingcenter.dto.request.TicketStatusUpdateRequest;
 import com.ligong.reportingcenter.exception.BusinessException;
+import com.ligong.reportingcenter.service.RepairProcessRecordService;
 import com.ligong.reportingcenter.service.TicketService;
 import jakarta.validation.Valid;
 import java.util.HashMap;
@@ -16,6 +21,8 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +43,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class TicketController {
 
     private final TicketService ticketService;
+    private final RepairProcessRecordService repairProcessRecordService;
 
     // 处理前端发送的 multipart/form-data 报修创建请求
     // 使用 @ModelAttribute 替代 @RequestPart，更宽松地接受 multipart 请求
@@ -44,6 +52,7 @@ public class TicketController {
             consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, "multipart/form-data"},
             produces = MediaType.APPLICATION_JSON_VALUE
     )
+    @PreAuthorize("hasRole('STUDENT')")
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> createWithFiles(
             // 前端虽然会传 studentId，这里统一忽略，始终使用当前登录用户
@@ -94,6 +103,7 @@ public class TicketController {
     }
 
     @GetMapping("/repair-orders/my")
+    @PreAuthorize("hasRole('STUDENT')")
     public Map<String, Object> listMyTickets(
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "page", defaultValue = "0") int page,
@@ -109,13 +119,8 @@ public class TicketController {
             throw new BusinessException("无法获取当前用户信息，请先登录");
         }
 
-        System.out.println("=== 查询学生报修单 ===");
-        System.out.println("学生ID: " + studentId);
-        System.out.println("状态筛选: " + status);
-
         // 先获取该学生的所有工单
         List<TicketSummaryDto> allTickets = ticketService.listByStudent(studentId);
-        System.out.println("该学生的所有工单数量: " + allTickets.size());
 
         List<TicketSummaryDto> tickets;
 
@@ -123,17 +128,14 @@ public class TicketController {
         if (status != null && !status.isBlank() && !"all".equalsIgnoreCase(status)) {
             // 将前端状态值映射到后端状态值
             TicketStatus ticketStatus = mapStatusFromFrontend(status);
-            System.out.println("映射后的状态: " + ticketStatus);
 
             // 在该学生的工单中筛选状态
             tickets = allTickets.stream()
                 .filter(t -> t.status() == ticketStatus)
                 .collect(java.util.stream.Collectors.toList());
-            System.out.println("筛选后的工单数量: " + tickets.size());
         } else {
             // 不筛选状态，返回所有工单
             tickets = allTickets;
-            System.out.println("返回所有工单，数量: " + tickets.size());
         }
 
         // 简单分页模拟
@@ -141,9 +143,6 @@ public class TicketController {
         int fromIndex = page * size;
         int toIndex = Math.min(fromIndex + size, total);
         List<TicketSummaryDto> pagedTickets = fromIndex < total ? tickets.subList(fromIndex, toIndex) : new java.util.ArrayList<>();
-
-        System.out.println("分页后的工单数量: " + pagedTickets.size());
-        System.out.println("===================");
 
         // 返回统一格式的响应
         Map<String, Object> result = new HashMap<>();
@@ -159,8 +158,10 @@ public class TicketController {
     }
 
     @GetMapping("/repair-orders/{id}")
+    @PreAuthorize("hasAnyRole('STUDENT','STAFF','ADMIN')")
     public Map<String, Object> detail(@PathVariable("id") Long id) {
         TicketDetailDto detail = ticketService.getTicketDetail(id);
+        assertCanReadTicket(detail);
         
         // 返回统一格式的响应
         Map<String, Object> result = new HashMap<>();
@@ -171,6 +172,7 @@ public class TicketController {
     }
 
     @DeleteMapping("/repair-orders/{id}")
+    @PreAuthorize("hasRole('STUDENT')")
     public Map<String, Object> delete(@PathVariable("id") Long id) {
         // 从 SecurityContext 获取当前登录学生ID
         String studentId;
@@ -193,9 +195,20 @@ public class TicketController {
     }
 
     @PostMapping("/repair-orders/{id}/evaluate")
+    @PreAuthorize("hasRole('STUDENT')")
     public Map<String, Object> evaluate(@PathVariable("id") Long id,
                                         @Valid @RequestBody TicketRatingRequest request) {
-        TicketDetailDto detail = ticketService.rateTicket(id, request);
+        TicketRatingRequest checkedRequest = new TicketRatingRequest(
+            currentUserId(),
+            request.score(),
+            request.comment(),
+            request.speedRating(),
+            request.qualityRating(),
+            request.attitudeRating(),
+            request.resolved(),
+            request.anonymous()
+        );
+        TicketDetailDto detail = ticketService.rateTicket(id, checkedRequest);
 
         // 统一返回结构 { code, data, message }
         Map<String, Object> result = new HashMap<>();
@@ -206,12 +219,18 @@ public class TicketController {
     }
 
     @PostMapping("/tasks/{id}/assign")
+    @PreAuthorize("hasRole('ADMIN')")
     public TicketDetailDto assign(@PathVariable("id") Long id,
-                                  @Valid @RequestBody TicketAssignRequest request) {
-        return ticketService.assignTicket(id, request);
+                                  @RequestBody TicketAssignRequest request) {
+        if (request == null || request.staffId() == null || request.staffId().isBlank()) {
+            throw new BusinessException("维修工ID不能为空");
+        }
+        TicketAssignRequest checkedRequest = new TicketAssignRequest(currentUserId(), request.staffId());
+        return ticketService.assignTicket(id, checkedRequest);
     }
 
     @PutMapping("/tasks/{id}/status")
+    @PreAuthorize("hasAnyRole('STAFF','ADMIN')")
     public Map<String, Object> changeTaskStatus(@PathVariable("id") Long id,
                                           @RequestBody Map<String, Object> requestBody) {
         // 从 SecurityContext 获取当前操作员ID
@@ -226,6 +245,10 @@ public class TicketController {
         }
         
         // 从请求体中获取状态
+        if (hasRole("STAFF") && !hasRole("ADMIN")) {
+            assertStaffOwnsTicket(ticketService.getTicketDetail(id));
+        }
+
         String newStatusStr = (String) requestBody.get("newStatus");
         if (newStatusStr == null || newStatusStr.isBlank()) {
             throw new BusinessException("新状态不能为空");
@@ -241,7 +264,7 @@ public class TicketController {
         }
         
         String rejectionReason = (String) requestBody.get("rejectionReason");
-        
+
         TicketStatusUpdateRequest request = new TicketStatusUpdateRequest(
             operatorId,
             newStatus,
@@ -258,6 +281,7 @@ public class TicketController {
     }
 
     @PutMapping("/tasks/{id}/complete")
+    @PreAuthorize("hasRole('STAFF')")
     public Map<String, Object> completeTask(@PathVariable("id") Long id,
                                       @RequestBody Map<String, Object> requestBody) {
         // 从 SecurityContext 获取当前操作员ID
@@ -273,7 +297,14 @@ public class TicketController {
         
         // 完成任务时，状态应该是 RESOLVED
         String rejectionReason = (String) requestBody.get("rejectionReason");
+        String notes = (String) requestBody.get("notes");
         
+        assertStaffOwnsTicket(ticketService.getTicketDetail(id));
+
+        if (notes != null && !notes.isBlank()) {
+            ticketService.updateProcessNotes(id, notes, operatorId);
+        }
+
         TicketStatusUpdateRequest request = new TicketStatusUpdateRequest(
             operatorId,
             TicketStatus.RESOLVED,
@@ -289,7 +320,52 @@ public class TicketController {
         return result;
     }
 
+    @PutMapping("/tasks/{id}/arrive")
+    @PreAuthorize("hasRole('STAFF')")
+    public Map<String, Object> arriveTask(@PathVariable("id") Long id,
+                                          @RequestBody(required = false) Map<String, Object> requestBody) {
+        assertStaffOwnsTicket(ticketService.getTicketDetail(id));
+        String content = textValue(requestBody, "content", "维修人员已到达现场并开始核查故障。");
+        String imageUrl = textValue(requestBody, "imageUrl", null);
+        RepairProcessRecordDto record = repairProcessRecordService.addRecord(
+            id,
+            currentUserId(),
+            new RepairProcessRecordRequest(RepairProcessActionType.ARRIVED, content, imageUrl)
+        );
+        return success("到场确认已提交", record);
+    }
+
+    @PostMapping("/tasks/{id}/process-records")
+    @PreAuthorize("hasRole('STAFF')")
+    public Map<String, Object> addTaskProcessRecord(@PathVariable("id") Long id,
+                                                    @Valid @RequestBody RepairProcessRecordRequest request) {
+        assertStaffOwnsTicket(ticketService.getTicketDetail(id));
+        RepairProcessRecordDto record = repairProcessRecordService.addRecord(id, currentUserId(), request);
+        return success("维修过程记录已提交", record);
+    }
+
+    @PostMapping("/tasks/{id}/transfer-request")
+    @PreAuthorize("hasRole('STAFF')")
+    public Map<String, Object> requestTransfer(@PathVariable("id") Long id,
+                                               @RequestBody Map<String, Object> requestBody) {
+        assertStaffOwnsTicket(ticketService.getTicketDetail(id));
+        String reason = textValue(requestBody, "reason", "");
+        if (reason.isBlank()) {
+            reason = textValue(requestBody, "content", "");
+        }
+        if (reason.isBlank()) {
+            throw new BusinessException("请填写转派原因");
+        }
+        RepairProcessRecordDto record = repairProcessRecordService.addRecord(
+            id,
+            currentUserId(),
+            new RepairProcessRecordRequest(RepairProcessActionType.TRANSFER_REQUEST, reason, textValue(requestBody, "imageUrl", null))
+        );
+        return success("转派申请已提交", record);
+    }
+
     @GetMapping("/tasks/my")
+    @PreAuthorize("hasRole('STAFF')")
     public Map<String, Object> listMyTasks(
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "page", defaultValue = "0") int page,
@@ -305,46 +381,24 @@ public class TicketController {
             throw new BusinessException("无法获取当前用户信息，请先登录");
         }
         
-        System.out.println("=== 查询维修工任务 ===");
-        System.out.println("维修工ID: " + staffId);
-        System.out.println("状态筛选: " + status);
-        
         List<TicketSummaryDto> tasks;
         if (status != null && !status.isBlank() && !status.equalsIgnoreCase("all")) {
             try {
                 // 将前端状态值映射到后端枚举值
                 TicketStatus ticketStatus = mapStatusFromFrontend(status);
-                System.out.println("映射后的状态: " + ticketStatus);
                 // 先获取该状态的所有任务，然后过滤出分配给当前维修工的
                 List<TicketSummaryDto> allStatusTasks = ticketService.listByStatus(ticketStatus);
-                System.out.println("该状态的所有任务数量: " + allStatusTasks.size());
                 // 过滤出分配给当前维修工的任务
                 tasks = allStatusTasks.stream()
-                    .filter(task -> {
-                        boolean matches = staffId.equals(task.staffId());
-                        if (!matches) {
-                            System.out.println("任务 " + task.ticketId() + " 的维修工ID: " + task.staffId() + " (不匹配)");
-                        }
-                        return matches;
-                    })
+                    .filter(task -> staffId.equals(task.staffId()))
                     .collect(java.util.stream.Collectors.toList());
             } catch (IllegalArgumentException ex) {
                 throw new BusinessException("无效的任务状态: " + status);
             }
         } else {
             // 获取分配给当前维修工的所有任务
-            System.out.println("查询分配给维修工的所有任务（status为all或null）...");
             tasks = ticketService.listByStaff(staffId);
-            System.out.println("查询结果数量: " + tasks.size());
-            if (tasks.isEmpty()) {
-                System.out.println("警告：没有找到分配给维修工 " + staffId + " 的任务");
-                System.out.println("可能原因：1. 数据库中确实没有分配给该维修工的任务");
-                System.out.println("         2. 需要管理员先分配任务给该维修工");
-            }
         }
-        
-        System.out.println("最终返回的任务数量: " + tasks.size());
-        System.out.println("===================");
         
         // 简单分页模拟
         int total = tasks.size();
@@ -366,8 +420,10 @@ public class TicketController {
     }
 
     @GetMapping("/tasks/{id}")
+    @PreAuthorize("hasRole('STAFF')")
     public Map<String, Object> taskDetail(@PathVariable("id") Long id) {
         TicketDetailDto detail = ticketService.getTicketDetail(id);
+        assertStaffOwnsTicket(detail);
         
         // 返回统一格式的响应
         Map<String, Object> result = new HashMap<>();
@@ -378,6 +434,7 @@ public class TicketController {
     }
 
     @GetMapping("/admin/repair-orders")
+    @PreAuthorize("hasRole('ADMIN')")
     public Map<String, Object> listAllTickets(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size,
@@ -447,6 +504,7 @@ public class TicketController {
     }
 
     @PutMapping("/admin/repair-orders/{id}/assign")
+    @PreAuthorize("hasRole('ADMIN')")
     public Map<String, Object> adminAssign(@PathVariable("id") Long id,
                                      @Valid @RequestBody Map<String, String> requestBody) {
         // 从 SecurityContext 获取当前操作员ID
@@ -478,40 +536,98 @@ public class TicketController {
         return result;
     }
 
+    @GetMapping("/admin/repair-orders/{id}/recommend-staff")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> recommendStaff(@PathVariable("id") Long id) {
+        List<StaffRecommendationDto> recommendations = ticketService.recommendStaffForTicket(id);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "维修人员推荐成功");
+        result.put("data", recommendations);
+        return result;
+    }
+
     @PutMapping("/admin/repair-orders/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public TicketDetailDto adminChangeStatus(@PathVariable("id") Long id,
-                                           @Valid @RequestBody TicketStatusUpdateRequest request) {
-        return ticketService.updateStatus(id, request);
+                                           @RequestBody TicketStatusUpdateRequest request) {
+        if (request == null || request.newStatus() == null) {
+            throw new BusinessException("请选择新的工单状态");
+        }
+        TicketStatusUpdateRequest checkedRequest = new TicketStatusUpdateRequest(
+            currentUserId(),
+            request.newStatus(),
+            request.rejectionReason()
+        );
+        return ticketService.updateStatus(id, checkedRequest);
     }
     
-    // 添加新接口：更新维修备注
     @PutMapping("/admin/repair-orders/{id}/repair-notes")
+    @PreAuthorize("hasRole('ADMIN')")
     public TicketDetailDto updateRepairNotes(@PathVariable("id") Long id,
                                            @RequestBody UpdateNotesRequest request) {
-        // TODO: 从Security Context中获取当前操作员ID
-        String operatorId = "admin";
+        String operatorId = currentUserId();
         return ticketService.updateRepairNotes(id, request.notes(), operatorId);
     }
     
-    // 添加新接口：更新处理备注
     @PutMapping("/admin/repair-orders/{id}/process-notes")
+    @PreAuthorize("hasRole('ADMIN')")
     public TicketDetailDto updateProcessNotes(@PathVariable("id") Long id,
-                                            @RequestBody UpdateNotesRequest request) {
-        // TODO: 从Security Context中获取当前操作员ID
-        String operatorId = "admin";
+                                             @RequestBody UpdateNotesRequest request) {
+        String operatorId = currentUserId();
         return ticketService.updateProcessNotes(id, request.notes(), operatorId);
     }
     
-    // 添加新接口：设置预计完成时间
     @PutMapping("/admin/repair-orders/{id}/estimated-completion-time")
+    @PreAuthorize("hasRole('ADMIN')")
     public TicketDetailDto setEstimatedCompletionTime(@PathVariable("id") Long id,
-                                                   @RequestBody SetEstimatedTimeRequest request) {
-        // TODO: 从Security Context中获取当前操作员ID
-        String operatorId = "admin";
+                                                    @RequestBody SetEstimatedTimeRequest request) {
+        String operatorId = currentUserId();
         return ticketService.setEstimatedCompletionTime(id, request.estimatedTime(), operatorId);
     }
     
     // 将前端状态值映射到后端枚举值
+    private String currentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "请先登录后再访问");
+        }
+        return authentication.getName();
+    }
+
+    private boolean hasRole(String role) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return false;
+        }
+        String authority = "ROLE_" + role;
+        return authentication.getAuthorities().stream()
+                .anyMatch(item -> authority.equals(item.getAuthority()));
+    }
+
+    private void assertCanReadTicket(TicketDetailDto detail) {
+        if (hasRole("ADMIN")) {
+            return;
+        }
+
+        String userId = currentUserId();
+        if (hasRole("STUDENT") && userId.equals(detail.studentId())) {
+            return;
+        }
+        if (hasRole("STAFF") && userId.equals(detail.staffId())) {
+            return;
+        }
+
+        throw new BusinessException(HttpStatus.FORBIDDEN, "当前账号无权查看该工单");
+    }
+
+    private void assertStaffOwnsTicket(TicketDetailDto detail) {
+        if (!currentUserId().equals(detail.staffId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "当前账号无权查看该维修任务");
+        }
+    }
+
     private TicketStatus mapStatusFromFrontend(String frontendStatus) {
         String status = frontendStatus.toLowerCase();
         return switch (status) {
@@ -530,6 +646,21 @@ public class TicketController {
                 }
             }
         };
+    }
+
+    private Map<String, Object> success(String message, Object data) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", message);
+        result.put("data", data);
+        return result;
+    }
+
+    private String textValue(Map<String, Object> body, String key, String fallback) {
+        if (body == null || body.get(key) == null) {
+            return fallback == null ? "" : fallback;
+        }
+        return String.valueOf(body.get(key)).trim();
     }
     
     // 内部请求类

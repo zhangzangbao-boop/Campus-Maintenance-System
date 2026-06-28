@@ -1,10 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Row, Col, Card, Table, Tag, Spin, Statistic, Alert, Button, Space, Popconfirm, message, Descriptions } from 'antd';
-import { Pie, Column, Line } from '@ant-design/charts';
-import { ReloadOutlined, DatabaseOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Row, Col, Card, Table, Tag, Skeleton, Statistic, Alert, Button, Space, Popconfirm, message, Descriptions } from 'antd';
+import { Line } from '@ant-design/charts';
+import { ReloadOutlined } from '@ant-design/icons';
 import { statisticsService } from './statisticsService';
 import { TASK_STATUS } from '../Worker/mytaskService';
 import { backupService } from './backupService';
+
+const chartColors = ['#0f62fe', '#00c2d1', '#7c3aed', '#16a34a', '#f59e0b', '#ef4444', '#64748b'];
+
+const polarToCartesian = (center, radius, angleInDegrees) => {
+  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180;
+  return {
+    x: center + (radius * Math.cos(angleInRadians)),
+    y: center + (radius * Math.sin(angleInRadians)),
+  };
+};
+
+const describeArc = (center, radius, startAngle, endAngle) => {
+  const start = polarToCartesian(center, radius, endAngle);
+  const end = polarToCartesian(center, radius, startAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+  return [
+    'M', start.x, start.y,
+    'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y,
+  ].join(' ');
+};
+
+const getChartPercent = (value, total) => total > 0 ? (value / total * 100) : 0;
 
 const DataAnalysis = () => {
   const [categoryData, setCategoryData] = useState([]);
@@ -12,6 +34,22 @@ const DataAnalysis = () => {
   const [ratingData, setRatingData] = useState([]);
   const [statusData, setStatusData] = useState([]);
   const [monthlyData, setMonthlyData] = useState([]); // 新增：月度统计数据
+  const [hotspotData, setHotspotData] = useState({
+    hotAreas: [],
+    categoryGrowth: [],
+    repeatedLocations: [],
+    staffWorkload: [],
+    categoryProcessingTime: [],
+    generatedAt: null,
+  });
+  const [facilityHealth, setFacilityHealth] = useState({
+    overallHealthScore: 100,
+    overallRiskLevel: '健康',
+    areaHealth: [],
+    categoryRisk: [],
+    suggestions: [],
+    generatedAt: null,
+  });
   const [overallStats, setOverallStats] = useState({
     totalRepairs: 0,
     avgProcessingTime: '暂无数据',
@@ -20,6 +58,7 @@ const DataAnalysis = () => {
   const [loading, setLoading] = useState(true);
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupList, setBackupList] = useState([]);
+  const [backupStatus, setBackupStatus] = useState(null);
   const [lastUpdateTime, setLastUpdateTime] = useState(null); // 新增：记录最后更新时间
 
   // 加载统计数据 - 使用 useCallback 包装
@@ -34,13 +73,15 @@ const DataAnalysis = () => {
 
     try {
       // 新增：获取月度统计数据
-      const [categoryStats, locationStats, ratingStats, statusStats, monthlyStats, overallStatsData] = await Promise.all([
+      const [categoryStats, locationStats, ratingStats, statusStats, monthlyStats, overallStatsData, hotspotStats, facilityHealthStats] = await Promise.all([
         statisticsService.getRepairCategoryStats(),
         statisticsService.getLocationRepairStats(),
         statisticsService.getRepairmanRatingStats(),
         statisticsService.getOrderStatusStats(),
         statisticsService.getMonthlyStats(), // 新增：获取月度统计
-        statisticsService.getOverallStats()
+        statisticsService.getOverallStats(),
+        statisticsService.getHotspotAnalysis(),
+        statisticsService.getFacilityHealth()
       ]);
 
       console.log('========================================');
@@ -51,6 +92,7 @@ const DataAnalysis = () => {
       console.log('状态统计数据:', statusStats);
       console.log('月度统计数据:', monthlyStats);
       console.log('总体统计数据:', overallStatsData);
+      console.log('热点问题分析:', hotspotStats);
       console.log('========================================');
 
       setCategoryData(categoryStats);
@@ -59,6 +101,8 @@ const DataAnalysis = () => {
       setStatusData(statusStats);
       setMonthlyData(monthlyStats); // 设置月度统计数据
       setOverallStats(overallStatsData);
+      setHotspotData(hotspotStats);
+      setFacilityHealth(facilityHealthStats);
 
       // 显示数据来源提示
       const dataSourceInfo = `
@@ -91,8 +135,12 @@ const DataAnalysis = () => {
   const loadBackups = async () => {
     setBackupLoading(true);
     try {
-      const list = await backupService.list();
+      const [list, status] = await Promise.all([
+        backupService.list(),
+        backupService.status().catch(() => null),
+      ]);
       setBackupList(Array.isArray(list) ? list : []);
+      setBackupStatus(status);
     } catch (error) {
       console.error('加载备份列表失败:', error);
     } finally {
@@ -117,7 +165,7 @@ const DataAnalysis = () => {
     setBackupLoading(true);
     try {
       await backupService.restore(fileName);
-      message.success('恢复完成，建议刷新页面并核对数据');
+      message.success('恢复完成，系统已在恢复前创建保护备份，建议刷新页面并核对数据');
     } catch (error) {
       console.error('恢复失败:', error);
     } finally {
@@ -131,17 +179,10 @@ const DataAnalysis = () => {
       return;
     }
 
-    console.log('准备删除备份文件:', fileName);
     setBackupLoading(true);
 
     try {
-      console.log('调用删除备份API...');
       await backupService.remove(fileName);
-      console.log('删除成功，刷新备份列表...');
-
-      message.success('备份已删除');
-
-      // 刷新备份列表
       await loadBackups();
     } catch (error) {
       console.error('删除备份失败:', error);
@@ -177,33 +218,42 @@ const DataAnalysis = () => {
 
   if (loading) {
     return (
-      <div style={{
-        textAlign: 'center',
-        padding: '50px',
-        height: '100vh',
-        overflow: 'auto'
-      }}>
-        <Spin size="large" />
-        <p>正在加载统计数据...</p>
-        <p style={{ fontSize: '12px', color: '#666' }}>数据来源: 数据库实时查询</p>
+      <div className="analytics-page analytics-loading">
+        <div className="analytics-header">
+          <div>
+            <div className="page-hero-eyebrow">实时统计</div>
+            <h2>图表分析驾驶舱</h2>
+            <p>正在从数据库汇总工单、评价、区域热点和设施健康数据。</p>
+          </div>
+        </div>
+        <Row gutter={[16, 16]}>
+          {[1, 2, 3].map((item) => (
+            <Col xs={24} md={8} key={item}>
+              <Card>
+                <Skeleton active paragraph={{ rows: 2 }} />
+              </Card>
+            </Col>
+          ))}
+          {[1, 2, 3, 4].map((item) => (
+            <Col xs={24} md={12} key={`chart-${item}`}>
+              <Card>
+                <Skeleton active paragraph={{ rows: 6 }} />
+              </Card>
+            </Col>
+          ))}
+        </Row>
       </div>
     );
   }
 
   return (
-    <div style={{
-      padding: '16px',
-      width: '100%',
-      height: 'auto',
-      overflow: 'visible'
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '16px'
-      }}>
-        <h2 style={{ margin: 0 }}>数据统计与分析</h2>
+    <div className="analytics-page">
+      <div className="analytics-header">
+        <div>
+          <div className="page-hero-eyebrow">图表分析</div>
+          <h2>数据统计与分析</h2>
+          <p>从工单池、评价反馈、维修负载和设施健康维度观察校园运维状态。</p>
+        </div>
 
         <Space size="middle">
           {/* 显示最后更新时间 */}
@@ -231,17 +281,6 @@ const DataAnalysis = () => {
         </Space>
       </div>
 
-      {/* 数据来源提示 */}
-      <Alert
-        message="数据来源说明"
-        description="所有统计数据均来自数据库实时查询，包括：总报修数（repair_order表）、报修分类占比（category_key字段）、位置统计（location字段）、维修工评分（repair_feedback表）、工单状态分布（status字段）。数据每30秒自动刷新一次。"
-        type="info"
-        icon={<DatabaseOutlined />}
-        showIcon
-        closable
-        style={{ marginBottom: '16px' }}
-      />
-
       {/* 备份与恢复 */}
       <Card
         size="small"
@@ -257,7 +296,20 @@ const DataAnalysis = () => {
             </Button>
           </Space>
         }
-      >
+        >
+        {backupStatus && (
+          <Descriptions
+            size="small"
+            column={{ xs: 1, sm: 2, md: 4 }}
+            style={{ marginBottom: 12 }}
+            items={[
+              { key: 'directory', label: '备份目录', children: backupStatus.directory || '-' },
+              { key: 'retentionDays', label: '保留天数', children: `${backupStatus.retentionDays ?? '-'} 天` },
+              { key: 'backupCount', label: '备份数量', children: `${backupStatus.backupCount ?? 0} 个` },
+              { key: 'database', label: '数据库', children: backupStatus.database || 'repairdb' },
+            ]}
+          />
+        )}
         <Table
           size="small"
           loading={backupLoading}
@@ -276,7 +328,7 @@ const DataAnalysis = () => {
                 <Space>
                   <Popconfirm
                     title="确认恢复？"
-                    description="恢复会覆盖当前数据，请先确认已经备份。"
+                    description="恢复会覆盖当前数据，系统会先自动创建一份保护备份。"
                     onConfirm={() => handleRestore(record.fileName)}
                   >
                     <Button size="small" type="primary" danger loading={backupLoading}>
@@ -300,7 +352,7 @@ const DataAnalysis = () => {
         <Alert
           type="warning"
           style={{ marginTop: 12 }}
-          message="恢复操作会覆盖当前数据库数据，执行前请确认已备份最新数据。"
+          message="恢复操作会覆盖当前数据库数据；系统会在恢复前自动创建保护备份。"
           showIcon
         />
       </Card>
@@ -353,7 +405,8 @@ const DataAnalysis = () => {
       <Row gutter={[16, 16]}>
         {/* 第一行第一列：报修分类占比 */}
         <Col xs={24} md={12}>
-          <Card 
+          <Card
+            className="analytics-chart-card"
             title="报修分类占比" 
             variant="borderless"
             extra={
@@ -368,7 +421,8 @@ const DataAnalysis = () => {
 
         {/* 第一行第二列：工单状态分布（新增） */}
         <Col xs={24} md={12}>
-          <Card 
+          <Card
+            className="analytics-chart-card"
             title="工单状态分布" 
             variant="borderless"
             extra={
@@ -383,7 +437,8 @@ const DataAnalysis = () => {
 
         {/* 第二行第一列：具体位置报修数量排行 */}
         <Col xs={24} md={12}>
-          <Card 
+          <Card
+            className="analytics-chart-card"
             title="位置报修数量排行" 
             variant="borderless"
             extra={
@@ -398,7 +453,8 @@ const DataAnalysis = () => {
 
         {/* 第二行第二列：维修人员平均评分排行 */}
         <Col xs={24} md={12}>
-          <Card 
+          <Card
+            className="analytics-chart-card"
             title="维修人员评分排行" 
             variant="borderless"
             extra={
@@ -415,7 +471,8 @@ const DataAnalysis = () => {
       {/* 新增：月度统计折线图，放在田字格下面 */}
       <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
         <Col xs={24}>
-          <Card 
+          <Card
+            className="analytics-chart-card"
             title="月度统计" 
             variant="borderless"
             extra={
@@ -428,65 +485,373 @@ const DataAnalysis = () => {
           </Card>
         </Col>
       </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
+        <Col xs={24}>
+          <Card
+            className="analytics-chart-card analytics-composite-card"
+            title="热点问题分析"
+            variant="borderless"
+            extra={
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                高频区域、异常增长、重复报修和任务负载实时分析
+              </div>
+            }
+          >
+            <HotspotAnalysis data={hotspotData} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
+        <Col xs={24}>
+          <Card
+            className="analytics-chart-card analytics-composite-card"
+            title="校园设施健康指数"
+            variant="borderless"
+            extra={
+              <div style={{ fontSize: '12px', color: '#666' }}>
+                基于报修频次、未闭环工单、重复报修、满意度和处理时长综合评分
+              </div>
+            }
+          >
+            <FacilityHealthPanel data={facilityHealth} />
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 };
 
-// 修复后的饼图组件
-const RepairCategoryPieChart = ({ data }) => {
-  console.log('饼图接收到的数据:', data);
-  
-  if (!data || data.length === 0) {
-    return <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>暂无数据</div>;
-  }
+const FacilityHealthPanel = ({ data }) => {
+  const areaHealth = data?.areaHealth || [];
+  const categoryRisk = data?.categoryRisk || [];
+  const suggestions = data?.suggestions || [];
 
-  // 简化配置，移除不支持的 label.type，使用 tooltip 和 legend 显示信息
-  const config = {
-    data: data,
-    angleField: 'value',
-    colorField: 'type',
-    radius: 0.8,
-    // 移除 label 配置，避免 "Unknown Component: shape.inner" 错误
-    // 使用 tooltip 和 legend 来显示信息
-    legend: {
-      position: 'right',
-      itemName: {
-        formatter: (text, item) => {
-          const dataItem = data.find(d => d.type === item.name);
-          return `${text}: ${dataItem ? dataItem.value : 0}`;
-        },
-      },
-    },
-    tooltip: {
-      formatter: (datum) => {
-        const total = data.reduce((sum, item) => sum + item.value, 0);
-        const percent = total > 0 ? ((datum.value / total) * 100).toFixed(1) : '0.0';
-        let extra = '';
-        if (typeof datum.avgRating === 'number') {
-          extra += `，平均评分：${datum.avgRating.toFixed(1)} 分`;
-        }
-        if (typeof datum.completedTickets === 'number') {
-          extra += `，已完成：${datum.completedTickets} 单`;
-        }
-        return { name: datum.type, value: `${datum.value} (${percent}%)${extra}` };
-      },
-    },
-    interactions: [{ type: 'element-active' }],
-    height: 300,
-    appendPadding: 10,
+  const scoreColor = (score) => {
+    if (score >= 80) return '#16a34a';
+    if (score >= 60) return '#d97706';
+    return '#dc2626';
   };
 
-  try {
-    return <Pie {...config} />;
-  } catch (error) {
-    console.error('饼图渲染错误:', error);
-    return (
-      <div style={{ textAlign: 'center', padding: '50px 0', color: '#ff4d4f' }}>
-        图表渲染失败，请检查数据格式
-      </div>
-    );
-  }
+  return (
+    <div>
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }} align="stretch" className="facility-top-row">
+        <Col xs={24} md={12}>
+          <Card size="small" variant="borderless" className="analysis-sub-card health-score-card">
+            <Statistic
+              title="综合健康分"
+              value={data?.overallHealthScore ?? 100}
+              suffix="分"
+              valueStyle={{ color: scoreColor(data?.overallHealthScore ?? 100) }}
+            />
+            <Tag style={{ marginTop: 8 }} color={(data?.overallRiskLevel || '健康') === '健康' ? 'green' : 'orange'}>
+              {data?.overallRiskLevel || '健康'}
+            </Tag>
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card size="small" variant="borderless" className="analysis-sub-card inspection-card">
+            <Alert
+              type="info"
+              showIcon
+              message="巡检建议"
+              description={suggestions.length > 0 ? suggestions.join('；') : '当前设施运行平稳，可保持常规巡检频率。'}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={14}>
+          <Card size="small" title="楼栋/区域健康分" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={areaHealth}
+              rowKey={(record) => record.area}
+              pagination={{ pageSize: 6 }}
+              columns={[
+                { title: '区域', dataIndex: 'area', key: 'area', ellipsis: true },
+                {
+                  title: '健康分',
+                  dataIndex: 'healthScore',
+                  key: 'healthScore',
+                  width: 90,
+                  render: (value) => <Tag color={value >= 80 ? 'green' : value >= 60 ? 'orange' : 'red'}>{value}</Tag>,
+                },
+                { title: '报修数', dataIndex: 'totalTickets', key: 'totalTickets', width: 80 },
+                { title: '未闭环', dataIndex: 'activeTickets', key: 'activeTickets', width: 80 },
+                { title: '重复', dataIndex: 'repeatedTickets', key: 'repeatedTickets', width: 70 },
+                { title: '平均评分', dataIndex: 'avgRating', key: 'avgRating', width: 90 },
+                { title: '风险', dataIndex: 'riskLevel', key: 'riskLevel', width: 90 },
+              ]}
+              locale={{ emptyText: '暂无区域健康数据' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} md={10}>
+          <Card size="small" title="分类风险排行" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={categoryRisk}
+              rowKey={(record) => record.category}
+              pagination={{ pageSize: 6 }}
+              columns={[
+                { title: '分类', dataIndex: 'category', key: 'category', ellipsis: true },
+                { title: '总数', dataIndex: 'totalTickets', key: 'totalTickets', width: 70 },
+                { title: '未闭环', dataIndex: 'activeTickets', key: 'activeTickets', width: 80 },
+                { title: '高优先级', dataIndex: 'highPriorityTickets', key: 'highPriorityTickets', width: 90 },
+                {
+                  title: '风险分',
+                  dataIndex: 'riskScore',
+                  key: 'riskScore',
+                  width: 90,
+                  render: (value) => <Tag color={value >= 60 ? 'red' : value >= 35 ? 'orange' : 'green'}>{value}</Tag>,
+                },
+              ]}
+              locale={{ emptyText: '暂无分类风险数据' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  );
 };
+
+const HotspotAnalysis = ({ data }) => {
+  const hotAreas = data?.hotAreas || [];
+  const categoryGrowth = data?.categoryGrowth || [];
+  const repeatedLocations = data?.repeatedLocations || [];
+  const staffWorkload = data?.staffWorkload || [];
+  const categoryProcessingTime = data?.categoryProcessingTime || [];
+
+  const formatTime = (value) => {
+    if (!value) return '-';
+    try {
+      return new Date(value).toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch (error) {
+      return value;
+    }
+  };
+
+  return (
+    <div>
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} md={8}>
+          <Card size="small" title="高频楼栋/区域" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={hotAreas}
+              rowKey={(record) => record.area}
+              pagination={false}
+              columns={[
+                { title: '区域', dataIndex: 'area', key: 'area', ellipsis: true },
+                { title: '报修数', dataIndex: 'totalTickets', key: 'totalTickets', width: 80 },
+                {
+                  title: '处理中',
+                  dataIndex: 'activeTickets',
+                  key: 'activeTickets',
+                  width: 80,
+                  render: (value) => value > 0 ? <Tag color="orange">{value}</Tag> : <Tag>{value}</Tag>,
+                },
+              ]}
+              locale={{ emptyText: '暂无热点区域' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card size="small" title="近 7 天异常增长分类" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={categoryGrowth}
+              rowKey={(record) => record.category}
+              pagination={false}
+              columns={[
+                { title: '分类', dataIndex: 'category', key: 'category', ellipsis: true },
+                { title: '近7天', dataIndex: 'recentCount', key: 'recentCount', width: 70 },
+                {
+                  title: '增长',
+                  dataIndex: 'growth',
+                  key: 'growth',
+                  width: 80,
+                  render: (value) => (
+                    <Tag color={value > 0 ? 'red' : value < 0 ? 'green' : 'default'}>
+                      {value > 0 ? `+${value}` : value}
+                    </Tag>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: '暂无增长数据' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card size="small" title="分类平均处理时长" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={categoryProcessingTime}
+              rowKey={(record) => record.category}
+              pagination={false}
+              columns={[
+                { title: '分类', dataIndex: 'category', key: 'category', ellipsis: true },
+                { title: '已完成', dataIndex: 'completedTickets', key: 'completedTickets', width: 80 },
+                { title: '平均时长', dataIndex: 'displayText', key: 'displayText', width: 100 },
+              ]}
+              locale={{ emptyText: '暂无处理时长数据' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={12}>
+          <Card size="small" title="重复报修地点" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={repeatedLocations}
+              rowKey={(record) => `${record.location}-${record.category}`}
+              pagination={{ pageSize: 5 }}
+              columns={[
+                { title: '地点', dataIndex: 'location', key: 'location', ellipsis: true },
+                { title: '分类', dataIndex: 'category', key: 'category', width: 100 },
+                { title: '次数', dataIndex: 'totalTickets', key: 'totalTickets', width: 70 },
+                {
+                  title: '未闭环',
+                  dataIndex: 'activeTickets',
+                  key: 'activeTickets',
+                  width: 80,
+                  render: (value) => value > 0 ? <Tag color="red">{value}</Tag> : <Tag>{value}</Tag>,
+                },
+                { title: '最近报修', dataIndex: 'lastCreatedAt', key: 'lastCreatedAt', width: 130, render: formatTime },
+              ]}
+              locale={{ emptyText: '暂无重复报修地点' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card size="small" title="维修人员任务负载" variant="borderless" className="analysis-sub-card">
+            <Table
+              size="small"
+              dataSource={staffWorkload}
+              rowKey={(record) => record.staffId}
+              pagination={{ pageSize: 5 }}
+              columns={[
+                { title: '维修员', dataIndex: 'staffName', key: 'staffName', ellipsis: true },
+                { title: '累计分配', dataIndex: 'totalAssigned', key: 'totalAssigned', width: 90 },
+                {
+                  title: '当前待办',
+                  dataIndex: 'activeTickets',
+                  key: 'activeTickets',
+                  width: 90,
+                  render: (value) => (
+                    <Tag color={value >= 3 ? 'red' : value > 0 ? 'orange' : 'green'}>{value}</Tag>
+                  ),
+                },
+                { title: '已完成', dataIndex: 'completedTickets', key: 'completedTickets', width: 80 },
+              ]}
+              locale={{ emptyText: '暂无维修员负载数据' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  );
+};
+
+const InteractiveDonutChart = ({ data, labelKey, valueKey, centerTitle }) => {
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const chartData = (data || [])
+    .map((item, index) => ({
+      ...item,
+      label: item[labelKey] || '未分类',
+      value: Number(item[valueKey] || 0),
+      color: chartColors[index % chartColors.length],
+    }))
+    .filter((item) => item.value > 0);
+
+  if (!chartData.length) {
+    return <div className="chart-empty">暂无数据</div>;
+  }
+
+  const total = chartData.reduce((sum, item) => sum + item.value, 0);
+  const active = chartData[Math.min(activeIndex, chartData.length - 1)] || chartData[0];
+  let currentAngle = 0;
+  const center = 120;
+  const radius = 82;
+
+  const segments = chartData.map((item, index) => {
+    const angle = getChartPercent(item.value, total) * 3.6;
+    const startAngle = currentAngle;
+    const endAngle = currentAngle + angle;
+    currentAngle = endAngle;
+    return { ...item, index, startAngle, endAngle };
+  });
+
+  return (
+    <div className="custom-donut">
+      <div className="custom-donut-visual">
+        <svg viewBox="0 0 240 240" className="custom-donut-svg" role="img">
+          <circle cx={center} cy={center} r={radius} className="custom-donut-track" />
+          {segments.map((segment) => {
+            const percent = getChartPercent(segment.value, total);
+            const isActive = segment.index === activeIndex;
+            return (
+              <path
+                key={segment.label}
+                d={describeArc(center, radius, segment.startAngle, segment.endAngle)}
+                stroke={segment.color}
+                strokeWidth={isActive ? 28 : 22}
+                strokeLinecap="round"
+                fill="none"
+                className="custom-donut-segment"
+                style={{ opacity: isActive ? 1 : 0.72 }}
+                onMouseEnter={() => setActiveIndex(segment.index)}
+                onClick={() => setActiveIndex(segment.index)}
+              >
+                <title>{`${segment.label}: ${segment.value}，${percent.toFixed(1)}%`}</title>
+              </path>
+            );
+          })}
+          <text x="120" y="112" textAnchor="middle" className="custom-donut-center-title">
+            {centerTitle}
+          </text>
+          <text x="120" y="140" textAnchor="middle" className="custom-donut-center-value">
+            {total}
+          </text>
+        </svg>
+        <div className="custom-chart-tooltip">
+          <strong>{active.label}</strong>
+          <span>{active.value} 条，占比 {getChartPercent(active.value, total).toFixed(1)}%</span>
+        </div>
+      </div>
+      <div className="custom-donut-legend">
+        {segments.map((item) => (
+          <button
+            type="button"
+            key={item.label}
+            className={item.index === activeIndex ? "donut-legend-item active" : "donut-legend-item"}
+            onMouseEnter={() => setActiveIndex(item.index)}
+            onFocus={() => setActiveIndex(item.index)}
+            onClick={() => setActiveIndex(item.index)}
+          >
+            <span style={{ background: item.color }} />
+            <strong>{item.label}</strong>
+            <em>{getChartPercent(item.value, total).toFixed(1)}%</em>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RepairCategoryPieChart = ({ data }) => (
+  <InteractiveDonutChart data={data} labelKey="type" valueKey="value" centerTitle="报修数" />
+);
 
 // 新增：工单状态分布饼图组件
 const OrderStatusPieChart = ({ data }) => {
@@ -536,86 +901,40 @@ const OrderStatusPieChart = ({ data }) => {
     };
   });
 
-  // 饼图配置，移除不支持的 label.type
-  const config = {
-    data: chartData,
-    angleField: 'value',
-    colorField: 'type',
-    radius: 0.8,
-    // 移除 label 配置，避免 "Unknown Component: shape.inner" 错误
-    // 使用 tooltip 和 legend 来显示信息
-    legend: {
-      position: 'right',
-      itemName: {
-        formatter: (text, item) => {
-          const dataItem = chartData.find(d => d.type === item.name);
-          return `${text}: ${dataItem ? dataItem.value : 0}`;
-        },
-      },
-    },
-    tooltip: {
-      formatter: (datum) => {
-        const total = chartData.reduce((sum, item) => sum + item.value, 0);
-        const percent = total > 0 ? ((datum.value / total) * 100).toFixed(1) : '0';
-        return { name: datum.type, value: `${datum.value} (${percent}%)` };
-      },
-    },
-    interactions: [{ type: 'element-active' }],
-    height: 300,
-    appendPadding: 10,
-  };
-
-  try {
-    return <Pie {...config} />;
-  } catch (error) {
-    console.error('状态饼图渲染错误:', error);
-    return (
-      <div style={{ textAlign: 'center', padding: '50px 0', color: '#ff4d4f' }}>
-        图表渲染失败，请检查数据格式
-      </div>
-    );
-  }
+  return <InteractiveDonutChart data={chartData} labelKey="type" valueKey="value" centerTitle="工单数" />;
 };
 
-// 修复后的柱状图组件
 const LocationRepairColumnChart = ({ data }) => {
-  console.log('柱状图接收到的数据:', data);
-  
   if (!data || data.length === 0) {
-    return <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>暂无数据</div>;
+    return <div className="chart-empty">暂无数据</div>;
   }
 
-  const config = {
-    data: data,
-    xField: 'location',
-    yField: 'count',
-    color: '#1890ff',
-    xAxis: {
-      label: {
-        autoRotate: false,
-        formatter: (text) => {
-          return text.length > 6 ? text.substring(0, 6) + '...' : text;
-        },
-      },
-    },
-    yAxis: {
-      label: {
-        formatter: (text) => text + ' 次',
-      },
-    },
-    height: 300,
-  };
+  const sorted = [...data].sort((a, b) => Number(b.count || 0) - Number(a.count || 0)).slice(0, 10);
+  const max = Math.max(...sorted.map((item) => Number(item.count || 0)), 1);
 
-  try {
-    return <Column {...config} />;
-  } catch (error) {
-    console.error('柱状图渲染错误:', error);
-    return (
-      <div style={{ textAlign: 'center', padding: '50px 0', color: '#ff4d4f' }}>
-        图表渲染失败，请检查数据格式
-      </div>
-    );
-  }
+  return (
+    <div className="custom-bar-list">
+      {sorted.map((item, index) => {
+        const value = Number(item.count || 0);
+        const percent = Math.max(6, value / max * 100);
+        return (
+          <div className="custom-bar-row" key={`${item.location}-${index}`}>
+            <div className="custom-bar-label" title={item.location}>{item.location}</div>
+            <div className="custom-bar-track">
+              <div
+                className="custom-bar-fill"
+                style={{
+                  width: `${percent}%`,
+                  background: `linear-gradient(90deg, ${chartColors[index % chartColors.length]}, #00c2d1)`,
+                }}
+              />
+            </div>
+            <div className="custom-bar-value">{value}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
 };
 
 // 新增：月度统计折线图组件
@@ -631,16 +950,21 @@ const MonthlyLineChart = ({ data }) => {
     xField: 'month',
     yField: 'orders',
     smooth: true,
-    color: '#13c2c2',
+    color: '#0f62fe',
     lineStyle: {
       lineWidth: 3,
+    },
+    area: {
+      style: {
+        fill: 'l(270) 0:#dff8ff 1:#ffffff',
+      },
     },
     point: {
       size: 5,
       shape: 'circle',
       style: {
         fill: 'white',
-        stroke: '#13c2c2',
+        stroke: '#0f62fe',
         lineWidth: 2,
       },
     },
@@ -663,7 +987,8 @@ const MonthlyLineChart = ({ data }) => {
         formatter: (text) => `${text} 单`,
       },
     },
-    height: 400,
+    height: 360,
+    interactions: [{ type: 'element-active' }],
     tooltip: {
       formatter: (datum) => {
         return { name: '工单数量', value: `${datum.orders} 单` };

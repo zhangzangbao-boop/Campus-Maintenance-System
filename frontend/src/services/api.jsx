@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:8080/api";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api";
 
 const request = async (endpoint, options = {}) => {
   const token = localStorage.getItem("token");
@@ -76,9 +76,6 @@ const request = async (endpoint, options = {}) => {
     if (response.status === 403) {
       console.warn("访问被拒绝，请检查您的权限");
       // 清除本地存储的令牌
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      window.location.href = "/login"; // 重定向到登录页
     }
 
     if (response.status === 401) {
@@ -169,6 +166,12 @@ const api = {
       }
     },
 
+    changePassword: (data) =>
+      request("/users/me/password", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
     // 获取指定用户信息
     getUser: (userId) => request(`/users/${userId}`),
 
@@ -197,15 +200,17 @@ const api = {
         method: "DELETE",
       }),
 
-    // 修正评价接口数据结构，后端接收的是 studentId, score 和 comment 字段
     evaluateOrder: (id, data) => {
-      console.log('API evaluateOrder 调用参数:', { id, data });
       const requestBody = {
-        studentId: data.studentId, // 学生ID
-        score: data.score || data.rating, // 前端传入的 rating 映射为后端的 score
-        comment: data.comment || data.feedback || '', // 前端传入的 feedback 映射为后端的 comment
+        studentId: data.studentId,
+        score: data.score || data.rating,
+        comment: data.comment || data.feedback || '',
+        speedRating: data.speedRating,
+        qualityRating: data.qualityRating,
+        attitudeRating: data.attitudeRating,
+        resolved: data.resolved,
+        anonymous: data.anonymous,
       };
-      console.log('API evaluateOrder 请求体:', requestBody);
       return request(`/repair-orders/${id}/evaluate`, {
         method: "POST",
         body: JSON.stringify(requestBody),
@@ -232,10 +237,29 @@ const api = {
         body: JSON.stringify({
           newStatus: "RESOLVED", // 后端枚举值：RESOLVED
           rejectionReason: null, // 完成任务不需要驳回理由
+          notes: notes || "",
         }),
       }),
 
     getTaskDetail: (id) => request(`/tasks/${id}`),
+
+    arriveTask: (id, data = {}) =>
+      request(`/tasks/${id}/arrive`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
+    addProcessRecord: (id, data) =>
+      request(`/tasks/${id}/process-records`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    requestTransfer: (id, data) =>
+      request(`/tasks/${id}/transfer-request`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
   },
 
   admin: {
@@ -249,6 +273,9 @@ const api = {
         method: "PUT", // 后端是 PUT 方法
         body: JSON.stringify({ repairmanId }), // 确保字段名与后端一致
       }),
+
+    recommendStaff: (orderId) =>
+      request(`/admin/repair-orders/${orderId}/recommend-staff`),
 
     // 修正驳回工单接口，使用通用状态更新接口
     rejectOrder: (orderId, reason) =>
@@ -312,9 +339,59 @@ const api = {
     // 新增：获取平均处理时间统计
     getStatsProcessingTime: () => request("/admin/stats/processing-time"),
 
+    // 新增：获取 SLA 超时预警统计
+    getStatsSla: () => request("/admin/stats/sla"),
+
+    // 新增：获取热点问题分析
+    getStatsHotspot: () => request("/admin/stats/hotspot"),
+
+    // 新增：获取校园设施健康指数
+    getStatsFacilityHealth: () => request("/admin/stats/facility-health"),
+
+    // 新增：运维中心
+    getAuditLogs: (params) => request(`/admin/audit-logs${toQueryString(params)}`),
+
+    getSystemConfig: () => request("/admin/system-config"),
+
+    updateSystemConfig: (key, data) =>
+      request(`/admin/system-config/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
+    getKnowledgeBase: (params) =>
+      request(`/admin/knowledge-base${toQueryString(params)}`),
+
+    createKnowledgeBase: (data) =>
+      request("/admin/knowledge-base", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    updateKnowledgeBase: (id, data) =>
+      request(`/admin/knowledge-base/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
+    deleteKnowledgeBase: (id) =>
+      request(`/admin/knowledge-base/${id}`, {
+        method: "DELETE",
+      }),
+
+    getTransferRequests: (params) =>
+      request(`/admin/transfer-requests${toQueryString(params)}`),
+
+    decideTransferRequest: (recordId, data) =>
+      request(`/admin/transfer-requests/${recordId}/decision`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
     // 备份相关接口
     createBackup: () => request("/admin/backup/create", { method: "POST" }),
     listBackups: () => request("/admin/backup/list"),
+    getBackupStatus: () => request("/admin/backup/status"),
     restoreBackup: (fileName) =>
       request("/admin/backup/restore", {
         method: "POST",
@@ -324,6 +401,84 @@ const api = {
       request(`/admin/backup/${encodeURIComponent(fileName)}`, {
         method: "DELETE",
       }),
+  },
+
+  notifications: {
+    list: () => request("/notifications"),
+
+    unreadCount: () => request("/notifications/unread-count"),
+
+    markRead: (id) =>
+      request(`/notifications/${id}/read`, {
+        method: "PUT",
+      }),
+
+    markAllRead: () =>
+      request("/notifications/read-all", {
+        method: "PUT",
+      }),
+  },
+
+  ticketComments: {
+    list: (ticketId) => request(`/repair-orders/${ticketId}/comments`),
+
+    add: (ticketId, data) =>
+      request(`/repair-orders/${ticketId}/comments`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    urge: (ticketId, data) =>
+      request(`/repair-orders/${ticketId}/comments/urge`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  processRecords: {
+    list: (ticketId) => request(`/repair-orders/${ticketId}/process-records`),
+
+    add: (ticketId, data) =>
+      request(`/repair-orders/${ticketId}/process-records`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  ai: {
+    analyzeTicket: (data) =>
+      request("/ai/ticket/analyze", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    findSimilarTickets: (data) =>
+      request("/ai/ticket/similar", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    generateRepairReport: (data) =>
+      request("/ai/repair-report/generate", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    summarizeTicket: (ticketId) => request(`/ai/ticket/${ticketId}/summary`),
+
+    draftKnowledge: (data) =>
+      request("/ai/knowledge/draft", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    status: () => request("/ai/status"),
+  },
+
+  knowledgeBase: {
+    search: (params) => request(`/knowledge-base/search${toQueryString(params)}`),
+
+    recommend: (params) => request(`/knowledge-base/recommend${toQueryString(params)}`),
   },
 
   common: {

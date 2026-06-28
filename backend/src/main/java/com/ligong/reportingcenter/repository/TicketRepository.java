@@ -85,6 +85,94 @@ public interface TicketRepository extends JpaRepository<RepairTicket, Long> {
     )
     List<Object[]> findRepairmanRatingStats();
 
+    @Query(
+        value = "SELECT " +
+                "  SUBSTRING_INDEX(TRIM(location), ' ', 1) AS area_name, " +
+                "  COUNT(*) AS total_tickets, " +
+                "  SUM(CASE WHEN status IN ('WAITING_ACCEPT', 'IN_PROGRESS') THEN 1 ELSE 0 END) AS active_tickets " +
+                "FROM repair_order " +
+                "WHERE location IS NOT NULL " +
+                "  AND TRIM(location) <> '' " +
+                "  AND (is_deleted IS NULL OR is_deleted = false) " +
+                "GROUP BY area_name " +
+                "HAVING total_tickets > 0 " +
+                "ORDER BY total_tickets DESC, active_tickets DESC " +
+                "LIMIT 8",
+        nativeQuery = true
+    )
+    List<Object[]> findHotAreaStats();
+
+    @Query(
+        value = "SELECT " +
+                "  category_key, " +
+                "  SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS recent_count, " +
+                "  SUM(CASE WHEN created_at < DATE_SUB(NOW(), INTERVAL 7 DAY) AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS previous_count " +
+                "FROM repair_order " +
+                "WHERE category_key IS NOT NULL " +
+                "  AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) " +
+                "  AND (is_deleted IS NULL OR is_deleted = false) " +
+                "GROUP BY category_key " +
+                "ORDER BY (recent_count - previous_count) DESC, recent_count DESC " +
+                "LIMIT 8",
+        nativeQuery = true
+    )
+    List<Object[]> findCategoryGrowthStats();
+
+    @Query(
+        value = "SELECT " +
+                "  location, " +
+                "  category_key, " +
+                "  COUNT(*) AS total_tickets, " +
+                "  SUM(CASE WHEN status IN ('WAITING_ACCEPT', 'IN_PROGRESS') THEN 1 ELSE 0 END) AS active_tickets, " +
+                "  MAX(created_at) AS last_created_at " +
+                "FROM repair_order " +
+                "WHERE location IS NOT NULL " +
+                "  AND TRIM(location) <> '' " +
+                "  AND category_key IS NOT NULL " +
+                "  AND (is_deleted IS NULL OR is_deleted = false) " +
+                "GROUP BY location, category_key " +
+                "HAVING total_tickets >= 2 " +
+                "ORDER BY total_tickets DESC, active_tickets DESC, last_created_at DESC " +
+                "LIMIT 8",
+        nativeQuery = true
+    )
+    List<Object[]> findRepeatedLocationStats();
+
+    @Query(
+        value = "SELECT " +
+                "  u.user_number, " +
+                "  COALESCE(u.name, u.user_number) AS staff_name, " +
+                "  COUNT(t.id) AS total_assigned, " +
+                "  SUM(CASE WHEN t.status IN ('WAITING_ACCEPT', 'IN_PROGRESS', 'RESOLVED', 'WAITING_FEEDBACK') THEN 1 ELSE 0 END) AS active_tickets, " +
+                "  SUM(CASE WHEN t.status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') THEN 1 ELSE 0 END) AS completed_tickets " +
+                "FROM sys_user u " +
+                "LEFT JOIN repair_order t ON t.repairman_id = u.user_number AND (t.is_deleted IS NULL OR t.is_deleted = false) " +
+                "WHERE u.role = 'STAFF' AND (u.enabled IS NULL OR u.enabled = true) " +
+                "GROUP BY u.user_number, u.name " +
+                "ORDER BY active_tickets DESC, total_assigned DESC " +
+                "LIMIT 8",
+        nativeQuery = true
+    )
+    List<Object[]> findStaffWorkloadStats();
+
+    @Query(
+        value = "SELECT " +
+                "  category_key, " +
+                "  COUNT(*) AS completed_tickets, " +
+                "  AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) AS avg_hours " +
+                "FROM repair_order " +
+                "WHERE category_key IS NOT NULL " +
+                "  AND status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND created_at IS NOT NULL " +
+                "  AND completed_at IS NOT NULL " +
+                "  AND (is_deleted IS NULL OR is_deleted = false) " +
+                "GROUP BY category_key " +
+                "ORDER BY avg_hours DESC " +
+                "LIMIT 8",
+        nativeQuery = true
+    )
+    List<Object[]> findCategoryProcessingTimeStats();
+
     // 使用悲观锁查询工单（用于关键操作）
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT rt FROM RepairTicket rt WHERE rt.ticketId = :id")
@@ -102,6 +190,58 @@ public interface TicketRepository extends JpaRepository<RepairTicket, Long> {
         nativeQuery = true
     )
     Double findAverageProcessingTimeHours();
+
+    @Query(
+        value = "SELECT COUNT(*) " +
+                "FROM repair_order " +
+                "WHERE repairman_id = :staffId " +
+                "  AND status IN ('IN_PROGRESS', 'RESOLVED', 'WAITING_FEEDBACK') " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Long countActiveTasksByStaffId(@Param("staffId") String staffId);
+
+    @Query(
+        value = "SELECT COUNT(*) " +
+                "FROM repair_order " +
+                "WHERE repairman_id = :staffId " +
+                "  AND status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Long countCompletedTasksByStaffId(@Param("staffId") String staffId);
+
+    @Query(
+        value = "SELECT COUNT(*) " +
+                "FROM repair_order " +
+                "WHERE repairman_id = :staffId " +
+                "  AND category_key = :categoryKey " +
+                "  AND status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Long countCompletedTasksByStaffIdAndCategory(@Param("staffId") String staffId,
+                                                 @Param("categoryKey") String categoryKey);
+
+    @Query(
+        value = "SELECT COALESCE(AVG(f.rating), 0) " +
+                "FROM repair_feedback f " +
+                "WHERE f.repairman_id = :staffId",
+        nativeQuery = true
+    )
+    Double findAverageRatingByStaffId(@Param("staffId") String staffId);
+
+    @Query(
+        value = "SELECT COALESCE(AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)), 72) " +
+                "FROM repair_order " +
+                "WHERE repairman_id = :staffId " +
+                "  AND status IN ('RESOLVED', 'WAITING_FEEDBACK', 'FEEDBACKED', 'CLOSED') " +
+                "  AND completed_at IS NOT NULL " +
+                "  AND created_at IS NOT NULL " +
+                "  AND (is_deleted IS NULL OR is_deleted = false)",
+        nativeQuery = true
+    )
+    Double findAverageProcessingHoursByStaffId(@Param("staffId") String staffId);
 
     // 获取已完成工单数量（用于统计）
     @Query(

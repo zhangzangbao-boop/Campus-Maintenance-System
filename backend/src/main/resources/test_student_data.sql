@@ -28,7 +28,7 @@ SELECT '学生用户:' AS info;
 SELECT user_number, name, role, enabled FROM sys_user WHERE role = 'STUDENT';
 
 -- 3. 检查特定学生的报修单
-SELECT '学号20210001的报修单:' AS info;
+SELECT '学号20260001的报修单:' AS info;
 SELECT
     id,
     status,
@@ -37,7 +37,7 @@ SELECT
     created_at,
     repairman_id
 FROM repair_order
-WHERE student_number = '20210001'
+WHERE student_number = '20260001'
 ORDER BY created_at DESC;
 
 -- 4. 检查各状态的报修单数量

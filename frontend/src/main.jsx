@@ -4,6 +4,11 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './app';
 
+if (import.meta.env.PROD) {
+  console.log = () => {};
+  console.debug = () => {};
+}
+
 const root = document.getElementById('root');
 if (!root) {
   throw new Error('Root element not found: please ensure <div id="root"></div> exists in your index.html');

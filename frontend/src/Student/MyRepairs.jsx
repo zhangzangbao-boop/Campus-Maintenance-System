@@ -17,6 +17,7 @@ import {
   message,
   Rate,
   Input,
+  Checkbox,
 } from "antd";
 import {
   EyeOutlined,
@@ -29,7 +30,10 @@ import {
   SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { repairUtils, repairService } from "../Services/repairService";
+import { repairUtils, repairService } from "../services/repairService";
+import RepairTimeline from "../components/RepairTimeline";
+import TicketComments from "../components/TicketComments";
+import RepairProcessRecords from "../components/RepairProcessRecords";
 
 // 状态映射函数：将后端枚举值转换为前端状态值
 const mapStatusToFrontend = (backendStatus) => {
@@ -61,7 +65,7 @@ const mapStatusToFrontend = (backendStatus) => {
 const { Option } = Select;
 const { TextArea } = Input;
 
-const MyRepairs = ({ onRefresh }) => {
+const MyRepairs = ({ onRefresh, targetOrderId, onTargetOrderHandled, initialFilters }) => {
   const [repairOrders, setRepairOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -79,6 +83,11 @@ const MyRepairs = ({ onRefresh }) => {
   const [evaluateModalVisible, setEvaluateModalVisible] = useState(false);
   const [evaluatingOrder, setEvaluatingOrder] = useState(null);
   const [rating, setRating] = useState(0);
+  const [speedRating, setSpeedRating] = useState(5);
+  const [qualityRating, setQualityRating] = useState(5);
+  const [attitudeRating, setAttitudeRating] = useState(5);
+  const [resolved, setResolved] = useState(true);
+  const [anonymous, setAnonymous] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [evaluating, setEvaluating] = useState(false);
 
@@ -296,6 +305,22 @@ const MyRepairs = ({ onRefresh }) => {
     applyFilters();
   }, [filters, repairOrders]);
 
+  useEffect(() => {
+    if (!initialFilters) return;
+    setFilters((prev) => ({
+      ...prev,
+      status: initialFilters.status || "all",
+      category: initialFilters.category || "all",
+      priority: initialFilters.priority || "all",
+      keyword: initialFilters.keyword || "",
+    }));
+  }, [
+    initialFilters?.status,
+    initialFilters?.category,
+    initialFilters?.priority,
+    initialFilters?.keyword,
+  ]);
+
   // 处理筛选条件变化
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({
@@ -349,6 +374,14 @@ const MyRepairs = ({ onRefresh }) => {
     setSelectedOrder(null);
   };
 
+  useEffect(() => {
+    if (!targetOrderId) return;
+    handleViewDetail({ id: targetOrderId, ticketId: targetOrderId });
+    if (onTargetOrderHandled) {
+      onTargetOrderHandled();
+    }
+  }, [targetOrderId]);
+
   // 删除报修记录
   const handleDeleteRepair = async (record) => {
     try {
@@ -386,6 +419,11 @@ const MyRepairs = ({ onRefresh }) => {
     setEvaluateModalVisible(false);
     setEvaluatingOrder(null);
     setRating(0);
+    setSpeedRating(5);
+    setQualityRating(5);
+    setAttitudeRating(5);
+    setResolved(true);
+    setAnonymous(false);
     setFeedback("");
   };
 
@@ -428,8 +466,15 @@ const MyRepairs = ({ onRefresh }) => {
         return;
       }
       
-      console.log('准备提交评价，参数:', { orderId, studentId, rating, feedback });
-      await repairService.evaluateRepairOrder(orderId, studentId, rating, feedback);
+      await repairService.evaluateRepairOrder(orderId, studentId, {
+        score: rating,
+        comment: feedback,
+        speedRating,
+        qualityRating,
+        attitudeRating,
+        resolved,
+        anonymous,
+      });
       
       message.success("评价提交成功！");
       handleCloseEvaluate();
@@ -1038,6 +1083,10 @@ const MyRepairs = ({ onRefresh }) => {
             </Descriptions>
 
             {/* 新增：现场照片展示 */}
+            <RepairTimeline order={selectedOrder} />
+            <RepairProcessRecords ticketId={selectedOrder.ticketId || selectedOrder.id} role="STUDENT" />
+            <TicketComments ticketId={selectedOrder.ticketId || selectedOrder.id} role="STUDENT" />
+
             {selectedOrder.images && selectedOrder.images.length > 0 ? (
               <div style={{ marginBottom: 24 }}>
                 <h4 style={{ marginBottom: 16, fontSize: "15px", fontWeight: "600", color: "#1f1f1f" }}>现场照片</h4>
@@ -1146,7 +1195,7 @@ const MyRepairs = ({ onRefresh }) => {
         confirmLoading={evaluating}
         okText="提交评价"
         cancelText="取消"
-        width={500}
+        width={560}
       >
         {evaluatingOrder && (
           <div>
@@ -1170,6 +1219,32 @@ const MyRepairs = ({ onRefresh }) => {
                 {rating > 0 ? `您选择了 ${rating} 星` : "请选择评分"}
               </div>
             </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <Row gutter={[16, 12]}>
+                <Col span={8}>
+                  <div style={{ marginBottom: 6 }}>维修速度</div>
+                  <Rate value={speedRating} onChange={setSpeedRating} />
+                </Col>
+                <Col span={8}>
+                  <div style={{ marginBottom: 6 }}>维修质量</div>
+                  <Rate value={qualityRating} onChange={setQualityRating} />
+                </Col>
+                <Col span={8}>
+                  <div style={{ marginBottom: 6 }}>服务态度</div>
+                  <Rate value={attitudeRating} onChange={setAttitudeRating} />
+                </Col>
+              </Row>
+            </div>
+
+            <Space style={{ marginBottom: 16 }} wrap>
+              <Checkbox checked={resolved} onChange={(event) => setResolved(event.target.checked)}>
+                问题已彻底解决
+              </Checkbox>
+              <Checkbox checked={anonymous} onChange={(event) => setAnonymous(event.target.checked)}>
+                匿名展示评价
+              </Checkbox>
+            </Space>
 
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>

@@ -62,6 +62,34 @@ const mapStatusToFrontend = (backendStatus) => {
   return 'pending'; // 默认值
 };
 
+const mapOrderSummary = (order = {}) => {
+  const description = order.description || '';
+  const rawTitle = order.title || '';
+  const title = (rawTitle && rawTitle !== description)
+    ? rawTitle
+    : (order.locationText ? `报修-${order.locationText}` : '报修单');
+
+  return {
+    ...order,
+    id: order.ticketId || order.id,
+    ticketId: order.ticketId || order.id,
+    category: order.categoryName || order.category || '',
+    location: order.locationText || order.location || '',
+    title,
+    description,
+    priority: order.priority || 'low',
+    status: mapStatusToFrontend(order.status),
+    originalStatus: order.status,
+    studentID: order.studentId || order.studentID || '',
+    repairmanId: order.staffId || order.repairmanId || null,
+    created_at: order.createdAt || order.created_at || '',
+    assigned_at: order.assignedAt || order.assigned_at || '',
+    estimated_completion_time: order.estimatedCompletionTime || order.estimated_completion_time || '',
+    deleted: order.deleted || false,
+    deletedAt: order.deletedAt || null,
+  };
+};
+
 // 数据服务方法 - 全部改为调用API
 export const repairService = {
   // 获取所有工单（管理员端使用）
@@ -80,41 +108,7 @@ export const repairService = {
         // 字段名：ticketId, categoryName, locationText, studentId, staffId, createdAt, deleted, deletedAt
         const mappedData = Array.isArray(rawData) ? rawData.map(order => {
           console.log('原始订单数据:', order);
-          // 确保title和description正确区分
-          const description = order.description || '';
-          // 如果后端返回的title和description相同，说明后端没有正确存储title，使用位置信息生成标题
-          const rawTitle = order.title || '';
-          const title = (rawTitle && rawTitle !== description) 
-            ? rawTitle 
-            : (order.locationText ? `报修-${order.locationText}` : '报修单');
-          
-          const mapped = {
-            ...order,
-            // 工单ID：后端字段是 ticketId
-            id: order.ticketId || order.id,
-            ticketId: order.ticketId || order.id,
-            // 分类：后端字段是 categoryName
-            category: order.categoryName || order.category || '',
-            // 位置：后端字段是 locationText
-            location: order.locationText || order.location || '',
-            // 标题：确保title字段存在且与description区分
-            title: title,
-            // 描述：后端字段是 description，确保与title不同
-            description: description,
-            // 优先级：后端字段是 priority
-            priority: order.priority || 'low',
-            // 状态：后端字段是 status，需要映射
-            status: mapStatusToFrontend(order.status),
-            // 学生ID：后端字段是 studentId
-            studentID: order.studentId || order.studentID || '',
-            // 维修工ID：后端字段是 staffId
-            repairmanId: order.staffId || order.repairmanId || null,
-            // 创建时间：后端字段是 createdAt（LocalDateTime）
-            created_at: order.createdAt || order.created_at || '',
-            // 删除标记：后端字段是 deleted
-            deleted: order.deleted || false,
-            deletedAt: order.deletedAt || null,
-          };
+          const mapped = mapOrderSummary(order);
           console.log('映射后的订单数据:', mapped);
           return mapped;
         }) : [];
@@ -133,6 +127,34 @@ export const repairService = {
     } catch (error) {
       console.error('获取工单失败:', error);
       message.error('获取工单失败: ' + error.message);
+      throw error;
+    }
+  },
+
+  // 获取 SLA 超时预警概览
+  getSlaOverview: async () => {
+    try {
+      const response = await api.admin.getStatsSla();
+      if (response.code === 200) {
+        const data = response.data || {};
+        const alertTickets = Array.isArray(data.alertTickets)
+          ? data.alertTickets.map(item => mapOrderSummary(item))
+          : [];
+
+        return {
+          ...data,
+          activeCount: Number(data.activeCount || 0),
+          overdueAcceptCount: Number(data.overdueAcceptCount || 0),
+          overdueCompletionCount: Number(data.overdueCompletionCount || 0),
+          warningCount: Number(data.warningCount || 0),
+          alertTotal: Number(data.alertTotal || 0),
+          overdueRate: Number(data.overdueRate || 0),
+          alertTickets,
+        };
+      }
+      throw new Error(response.message || '获取SLA预警失败');
+    } catch (error) {
+      console.error('获取SLA预警失败:', error);
       throw error;
     }
   },
@@ -221,6 +243,7 @@ export const repairService = {
           created_at: orderDetail.createdAt || orderDetail.created_at,
           assigned_at: orderDetail.assignedAt || orderDetail.assigned_at,
           completed_at: orderDetail.completedAt || orderDetail.completed_at,
+          closedAt: orderDetail.closedAt || orderDetail.closed_at,
           rejection_reason: orderDetail.rejectionReason || orderDetail.rejection_reason,
           studentID: orderDetail.studentId || orderDetail.studentID,
           studentName: orderDetail.studentNickname || orderDetail.studentName || '未知',
@@ -234,6 +257,8 @@ export const repairService = {
           // 评价信息
           rating: orderDetail.rating?.score || orderDetail.rating || null,
           feedback: orderDetail.rating?.comment || orderDetail.feedback || null,
+          ratingTime: orderDetail.rating?.ratedAt || orderDetail.ratingTime || null,
+          logs: orderDetail.logs || [],
           // 维修备注
           repairNotes: orderDetail.repairNotes || null,
           processNotes: orderDetail.processNotes || null,
@@ -360,6 +385,32 @@ export const repairService = {
       console.error('获取维修人员列表失败:', error);
       message.error('获取维修人员列表失败: ' + (error.message || '未知错误'));
       throw error; // 不再返回默认数据，直接抛出错误
+    }
+  },
+
+  // 获取智能派单推荐
+  getRecommendedRepairmen: async (orderId) => {
+    try {
+      const response = await api.admin.recommendStaff(orderId);
+      if (response.code === 200) {
+        const rawData = Array.isArray(response.data) ? response.data : [];
+        return rawData.map(item => ({
+          ...item,
+          staffId: item.staffId || item.userId || item.id,
+          staffName: item.staffName || item.nickname || item.name || '未知维修人员',
+          score: Number(item.score || 0),
+          activeTaskCount: Number(item.activeTaskCount || 0),
+          sameCategoryCompletedCount: Number(item.sameCategoryCompletedCount || 0),
+          completedTaskCount: Number(item.completedTaskCount || 0),
+          averageRating: Number(item.averageRating || 0),
+          averageProcessingHours: Number(item.averageProcessingHours || 0),
+          reason: item.reason || '暂无推荐依据',
+        }));
+      }
+      throw new Error(response.message || '获取智能派单推荐失败');
+    } catch (error) {
+      console.error('获取智能派单推荐失败:', error);
+      throw error;
     }
   },
 
@@ -522,19 +573,17 @@ export const repairService = {
   },
 
   // 提交评价（学生端）
-  evaluateRepairOrder: async (orderId, studentId, rating, feedback) => {
+  evaluateRepairOrder: async (orderId, studentId, ratingOrData, feedback) => {
     try {
-      console.log('提交评价参数:', { orderId, studentId, rating, feedback });
-      
       if (!studentId) {
         throw new Error('学生ID不能为空');
       }
-      
-      // 后端需要 studentId, score, comment 字段
+      const payload = typeof ratingOrData === 'object'
+        ? { ...ratingOrData }
+        : { score: ratingOrData, comment: feedback || '' };
       const response = await api.student.evaluateOrder(orderId, { 
-        studentId: studentId,
-        score: rating, 
-        comment: feedback || '' 
+        studentId,
+        ...payload,
       });
       
       if (response.code === 200) {

@@ -7,7 +7,8 @@ import {
   Avatar, 
   message,
   Upload,
-  Space
+  Space,
+  Tabs
 } from 'antd';
 import { 
   UserOutlined, 
@@ -19,7 +20,9 @@ import api from './api.jsx';
 
 const PersonalInfoEd = ({ visible, onCancel, userInfo, onUpdate }) => {
   const [form] = Form.useForm();
+  const [passwordForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(null); // 初始化为 null 而不是空字符串
   // 新增：用于存储用户新选择的头像文件
   const [avatarFile, setAvatarFile] = useState(null);
@@ -32,6 +35,22 @@ const PersonalInfoEd = ({ visible, onCancel, userInfo, onUpdate }) => {
       'ADMIN': '系统管理部',
     };
     return roleDepartmentMap[role] || '';
+  };
+
+  const handlePasswordSubmit = async (values) => {
+    setPasswordLoading(true);
+    try {
+      await api.users.changePassword({
+        oldPassword: values.oldPassword,
+        newPassword: values.newPassword,
+      });
+      passwordForm.resetFields();
+      message.success('密码修改成功，请下次使用新密码登录');
+    } catch (error) {
+      message.error(error.message || '密码修改失败');
+    } finally {
+      setPasswordLoading(false);
+    }
   };
 
   // 当用户信息或弹窗显示状态变化时，更新表单数据
@@ -228,82 +247,145 @@ const PersonalInfoEd = ({ visible, onCancel, userInfo, onUpdate }) => {
       open={visible}
       onCancel={onCancel}
       footer={null}
-      width={600}
+      width={720}
       destroyOnHidden={true}
       maskClosable={false}
+      className="profile-modal"
     >
-      <div style={{ display: 'flex', gap: 24, marginBottom: 24 }}>
-        {/* 头像上传区域 */}
-        <div style={{ textAlign: 'center' }}>
-          <Avatar
-            size={80}
-            src={avatarUrl && avatarUrl.trim() ? avatarUrl : null}
-            icon={(!avatarUrl || !avatarUrl.trim()) && <UserOutlined />}
-            style={{ marginBottom: 8 }}
-          />
-          <Upload {...uploadProps}>
-            <Button icon={<UploadOutlined />} size="small">
-              更换头像
-            </Button>
-          </Upload>
-        </div>
+      <Tabs
+        items={[
+          {
+            key: 'profile',
+            label: '基本信息',
+            children: (
+              <div className="profile-editor">
+                <div className="profile-editor-side">
+                  <Avatar
+                    size={92}
+                    src={avatarUrl && avatarUrl.trim() ? avatarUrl : null}
+                    icon={(!avatarUrl || !avatarUrl.trim()) && <UserOutlined />}
+                    className="profile-editor-avatar"
+                  />
+                  <div className="profile-editor-name">
+                    {userInfo?.nickname || userInfo?.username || userInfo?.userId || '用户'}
+                  </div>
+                  <div className="profile-editor-role">
+                    {getDepartmentByRole(userInfo?.role || '') || '校园用户'}
+                  </div>
+                  <Upload {...uploadProps}>
+                    <Button icon={<UploadOutlined />} size="small">
+                      更换头像
+                    </Button>
+                  </Upload>
+                </div>
 
-        {/* 表单区域 */}
-        <div style={{ flex: 1 }}>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={handleSubmit}
-            initialValues={initialUserInfo}
-          >
-            <Form.Item
-              label="用户名"
-              name="username"
-              rules={[
-                { required: true, message: '请输入用户名!' },
-                { min: 2, message: '用户名至少2个字符!' }
-              ]}
-            >
-              <Input 
-                prefix={<UserOutlined />} 
-                placeholder="请输入用户名（对应数据库sys_user表的name字段）"
-              />
-            </Form.Item>
-            
-            <Form.Item
-              label="手机号"
-              name="phone"
-              rules={[
-                { pattern: /^1[3-9]\d{9}$/, message: '请输入有效的手机号码!' }
-              ]}
-            >
-              <Input placeholder="请输入手机号码" />
-            </Form.Item>
+                <div className="profile-editor-form">
+                  <Form
+                    form={form}
+                    layout="vertical"
+                    onFinish={handleSubmit}
+                    initialValues={initialUserInfo}
+                  >
+                    <Form.Item
+                      label="用户名"
+                      name="username"
+                      rules={[
+                        { required: true, message: '请输入用户名!' },
+                        { min: 2, message: '用户名至少2个字符!' }
+                      ]}
+                    >
+                      <Input 
+                        prefix={<UserOutlined />} 
+                        placeholder="请输入用户名"
+                      />
+                    </Form.Item>
+                    
+                    <Form.Item
+                      label="手机号"
+                      name="phone"
+                      rules={[
+                        { pattern: /^1[3-9]\d{9}$/, message: '请输入有效的手机号码!' }
+                      ]}
+                    >
+                      <Input placeholder="请输入手机号码" />
+                    </Form.Item>
 
-            <Form.Item
-              label="部门"
-              name="department"
-            >
-              <Input 
-                placeholder="部门（根据角色自动设置，不可修改）" 
-                disabled={true}
-                style={{ backgroundColor: '#f5f5f5' }}
-              />
-            </Form.Item>
+                    <Form.Item label="部门" name="department">
+                      <Input 
+                        placeholder="部门（根据角色自动设置，不可修改）" 
+                        disabled
+                        style={{ backgroundColor: '#f5f5f5' }}
+                      />
+                    </Form.Item>
 
-            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-              <Space>
-                <Button onClick={onCancel}>
-                  取消
-                </Button>
-                <Button type="primary" htmlType="submit" loading={loading}>
-                  保存更改
-                </Button>
-              </Space>
-            </Form.Item>
-          </Form>
-        </div>
-      </div>
+                    <Form.Item className="profile-editor-actions">
+                      <Space>
+                        <Button onClick={onCancel}>取消</Button>
+                        <Button type="primary" htmlType="submit" loading={loading}>
+                          保存更改
+                        </Button>
+                      </Space>
+                    </Form.Item>
+                  </Form>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: 'password',
+            label: '修改密码',
+            children: (
+              <Form
+                form={passwordForm}
+                layout="vertical"
+                onFinish={handlePasswordSubmit}
+              >
+                <Form.Item
+                  label="原密码"
+                  name="oldPassword"
+                  rules={[{ required: true, message: '请输入原密码' }]}
+                >
+                  <Input.Password placeholder="请输入当前登录密码" />
+                </Form.Item>
+                <Form.Item
+                  label="新密码"
+                  name="newPassword"
+                  rules={[
+                    { required: true, message: '请输入新密码' },
+                    { min: 6, message: '新密码至少 6 位' },
+                    { max: 64, message: '新密码不能超过 64 位' },
+                  ]}
+                >
+                  <Input.Password placeholder="请输入新密码" />
+                </Form.Item>
+                <Form.Item
+                  label="确认新密码"
+                  name="confirmPassword"
+                  dependencies={['newPassword']}
+                  rules={[
+                    { required: true, message: '请再次输入新密码' },
+                    ({ getFieldValue }) => ({
+                      validator(_, value) {
+                        if (!value || getFieldValue('newPassword') === value) {
+                          return Promise.resolve();
+                        }
+                        return Promise.reject(new Error('两次输入的新密码不一致'));
+                      },
+                    }),
+                  ]}
+                >
+                  <Input.Password placeholder="请再次输入新密码" />
+                </Form.Item>
+                <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                  <Button type="primary" htmlType="submit" loading={passwordLoading}>
+                    修改密码
+                  </Button>
+                </Form.Item>
+              </Form>
+            ),
+          },
+        ]}
+      />
     </Modal>
   );
 };

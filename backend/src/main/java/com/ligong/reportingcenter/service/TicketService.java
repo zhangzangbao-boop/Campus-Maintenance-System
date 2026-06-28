@@ -19,17 +19,16 @@ import com.ligong.reportingcenter.repository.RatingRepository;
 import com.ligong.reportingcenter.repository.TicketImageRepository;
 import com.ligong.reportingcenter.repository.TicketRepository;
 import com.ligong.reportingcenter.repository.TicketStatusLogRepository;
+import com.ligong.reportingcenter.repository.UserRepository;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -48,6 +47,10 @@ public class TicketService {
     private final RatingRepository ratingRepository;
     private final UserService userService;
     private final CategoryService categoryService;
+    private final NotificationService notificationService;
+    private final UserRepository userRepository;
+    private final FileStorageService fileStorageService;
+    private final SystemConfigService systemConfigService;
 
     @Value("${upload.path:./uploads}")
     private String uploadPath;
@@ -92,6 +95,7 @@ public class TicketService {
             }
         }
         ticketRepository.flush();
+        notifyAdminsNewTicket(ticket);
         return toDetailDto(ticket);
     }
 
@@ -125,43 +129,18 @@ public class TicketService {
 
         appendStatusLog(ticket, null, TicketStatus.WAITING_ACCEPT, student);
 
-        // 处理上传的图片文件，保存到文件系统
         if (images != null && !images.isEmpty()) {
-            try {
-                // 创建上传目录
-                Path uploadDir = Paths.get(uploadPath);
-                if (!Files.exists(uploadDir)) {
-                    Files.createDirectories(uploadDir);
-                }
-
-                for (MultipartFile image : images) {
-                    if (!image.isEmpty()) {
-                        // 生成唯一文件名
-                        String originalFilename = image.getOriginalFilename();
-                        String extension = "";
-                        if (originalFilename != null && originalFilename.contains(".")) {
-                            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
-                        }
-                        String filename = UUID.randomUUID().toString() + extension;
-
-                        // 保存文件到文件系统
-                        Path filePath = uploadDir.resolve(filename);
-                        Files.write(filePath, image.getBytes());
-
-                        // 保存图片URL到数据库
-                        TicketImage ticketImage = new TicketImage();
-                        ticketImage.setTicket(ticket);
-                        ticketImage.setImageUrl("/uploads/" + filename);
-                        ticketImage.setUploadedAt(LocalDateTime.now());
-                        imageRepository.save(ticketImage);
-                    }
-                }
-            } catch (IOException e) {
-                throw new BusinessException("图片保存失败: " + e.getMessage());
+            for (String imageUrl : fileStorageService.storeImages(images)) {
+                TicketImage ticketImage = new TicketImage();
+                ticketImage.setTicket(ticket);
+                ticketImage.setImageUrl(imageUrl);
+                ticketImage.setUploadedAt(LocalDateTime.now());
+                imageRepository.save(ticketImage);
             }
         }
 
         ticketRepository.flush();
+        notifyAdminsNewTicket(ticket);
         return toDetailDto(ticket);
     }
 
@@ -196,17 +175,25 @@ public class TicketService {
             if (staff.getRole() != UserRole.STAFF) {
                 throw new BusinessException("仅维修工角色可以被分配");
             }
-            // 检查工单是否已被分配给其他维修工
-            if (ticket.getStaff() != null 
-                    && !ticket.getStaff().getUserId().equals(request.staffId())
-                    && ticket.getStatus() != TicketStatus.WAITING_ACCEPT) {
-                throw new BusinessException("该工单已被分配给其他维修工：" + ticket.getStaff().getNickname());
+            if (ticket.getStatus() != TicketStatus.WAITING_ACCEPT
+                    && ticket.getStatus() != TicketStatus.IN_PROGRESS) {
+                throw new BusinessException("当前工单状态不允许派单或转派");
             }
+            User oldStaff = ticket.getStaff();
             ticket.setStaff(staff);
             ticket.setAssignedAt(LocalDateTime.now());
             TicketStatus oldStatus = ticket.getStatus();
             ticket.setStatus(TicketStatus.IN_PROGRESS);
             appendStatusLog(ticket, oldStatus, TicketStatus.IN_PROGRESS, operator);
+            if (oldStaff != null && !oldStaff.getUserId().equals(staff.getUserId())) {
+                notificationService.notifyUser(
+                    oldStaff,
+                    "工单已转派",
+                    "工单 #" + ticket.getTicketId() + " 已转派给 " + safeName(staff) + " 继续处理。",
+                    ticket
+                );
+            }
+            notifyTicketAssigned(ticket, staff);
             return toDetailDto(ticket);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new BusinessException("工单已被其他用户修改，请刷新后重试");
@@ -221,6 +208,7 @@ public class TicketService {
             User operator = userService.loadActiveUser(request.operatorId());
             TicketStatus oldStatus = ticket.getStatus();
             TicketStatus newStatus = request.newStatus();
+            User oldStaff = ticket.getStaff();
 
             // 新增状态转换合法性校验
             if (!isValidStatusTransition(oldStatus, newStatus)) {
@@ -249,6 +237,7 @@ public class TicketService {
 
             ticket.setStatus(newStatus);
             appendStatusLog(ticket, oldStatus, newStatus, operator);
+            notifyStatusChanged(ticket, oldStatus, newStatus, oldStaff);
             return toDetailDto(ticket);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new BusinessException("工单已被其他用户修改，请刷新后重试");
@@ -313,12 +302,18 @@ public class TicketService {
             rating.setStaff(ticket.getStaff());
             rating.setScore(request.score());
             rating.setComment(request.comment());
+            rating.setSpeedRating(request.speedRating());
+            rating.setQualityRating(request.qualityRating());
+            rating.setAttitudeRating(request.attitudeRating());
+            rating.setResolved(request.resolved());
+            rating.setAnonymous(Boolean.TRUE.equals(request.anonymous()));
             ratingRepository.save(rating);
 
             TicketStatus oldStatus = ticket.getStatus();
             ticket.setStatus(TicketStatus.FEEDBACKED);
             ticket.setClosedAt(LocalDateTime.now());
             appendStatusLog(ticket, oldStatus, TicketStatus.FEEDBACKED, ticket.getStudent());
+            notifyTicketRated(ticket, request.score());
             return toDetailDto(ticket);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new BusinessException("工单已被其他用户修改，请刷新后重试");
@@ -373,6 +368,56 @@ public class TicketService {
         return toDetailDto(ticket);
     }
 
+    @Transactional(readOnly = true)
+    public List<StaffRecommendationDto> recommendStaffForTicket(Long ticketId) {
+        RepairTicket targetTicket = findTicket(ticketId);
+        String targetCategory = targetTicket.getCategory() != null
+            ? targetTicket.getCategory().getCategoryName()
+            : null;
+
+        List<User> staffUsers = userRepository.findByRoleAndIsActiveTrue(UserRole.STAFF);
+
+        return staffUsers.stream()
+            .map(staff -> buildStaffRecommendation(staff, targetCategory))
+            .sorted(Comparator.comparingDouble(StaffRecommendationDto::score).reversed())
+            .toList();
+    }
+
+    private StaffRecommendationDto buildStaffRecommendation(User staff, String targetCategory) {
+        String staffId = staff.getUserId();
+        int activeTaskCount = toInt(ticketRepository.countActiveTasksByStaffId(staffId));
+        int sameCategoryCompletedCount = targetCategory == null
+            ? 0
+            : toInt(ticketRepository.countCompletedTasksByStaffIdAndCategory(staffId, targetCategory));
+        int completedTaskCount = toInt(ticketRepository.countCompletedTasksByStaffId(staffId));
+        double averageRating = safeDouble(ticketRepository.findAverageRatingByStaffId(staffId), 0.0);
+        double averageProcessingHours = safeDouble(ticketRepository.findAverageProcessingHoursByStaffId(staffId), 72.0);
+
+        double loadScore = Math.max(0, 1.0 - Math.min(activeTaskCount, 8) / 8.0) * 35.0;
+        double categoryScore = Math.min(sameCategoryCompletedCount, 5) / 5.0 * 25.0;
+        double ratingScore = averageRating > 0 ? averageRating / 5.0 * 20.0 : 12.0;
+        double speedScore = Math.max(0, 1.0 - Math.min(averageProcessingHours, 120.0) / 120.0) * 20.0;
+        double score = Math.round((loadScore + categoryScore + ratingScore + speedScore) * 10.0) / 10.0;
+
+        String reason = "当前待办 " + activeTaskCount
+            + " 单，同类完成 " + sameCategoryCompletedCount
+            + " 单，平均评分 " + String.format(java.util.Locale.ROOT, "%.1f", averageRating)
+            + "，平均处理 " + String.format(java.util.Locale.ROOT, "%.1f", averageProcessingHours) + " 小时";
+
+        return new StaffRecommendationDto(
+            staff.getUserId(),
+            safeUserName(staff),
+            staff.getContactPhone(),
+            score,
+            activeTaskCount,
+            sameCategoryCompletedCount,
+            completedTaskCount,
+            Math.round(averageRating * 10.0) / 10.0,
+            Math.round(averageProcessingHours * 10.0) / 10.0,
+            reason
+        );
+    }
+
     /**
      * 学生删除自己的报修单：物理删除（从数据库中彻底删除）
      * 仅允许删除待受理状态的工单
@@ -407,10 +452,9 @@ public class TicketService {
                             Path filePath = Paths.get(uploadPath, filename);
                             if (Files.exists(filePath)) {
                                 Files.delete(filePath);
-                                System.out.println("已删除图片文件: " + filePath);
                             }
                         } catch (IOException e) {
-                            System.out.println("删除图片文件失败: " + e.getMessage());
+                            // 图片文件清理失败不阻断工单删除，数据库记录仍按主流程处理。
                         }
                     }
                     // 删除数据库中的图片记录
@@ -433,8 +477,6 @@ public class TicketService {
             // 最后删除工单本身（物理删除）
             ticketRepository.delete(ticket);
             ticketRepository.flush();
-
-            System.out.println("已物理删除工单ID: " + ticketId);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new BusinessException("工单已被其他用户修改，请刷新后重试");
         }
@@ -452,33 +494,10 @@ public class TicketService {
 
     @Transactional
     public List<TicketSummaryDto> listByStaff(String staffId) {
-        System.out.println("TicketService.listByStaff - 维修工ID: " + staffId);
         User staff = userService.loadActiveUser(staffId);
-        System.out.println("找到用户: " + staff.getUserId() + ", 角色: " + staff.getRole());
 
         // 查询分配给该维修工的所有任务
         List<RepairTicket> tickets = ticketRepository.findByStaff(staff);
-        System.out.println("数据库查询到的工单数量: " + tickets.size());
-
-        if (tickets.isEmpty()) {
-            System.out.println("警告：没有找到分配给维修工 " + staffId + " 的任务");
-            // 检查数据库中是否有任何任务
-            long totalTickets = ticketRepository.count();
-            System.out.println("数据库中总任务数: " + totalTickets);
-            // 检查有多少任务已经分配了维修工
-            List<RepairTicket> allTickets = ticketRepository.findAll();
-            long assignedCount = allTickets.stream()
-                .filter(t -> t.getStaff() != null)
-                .count();
-            System.out.println("已分配的任务数: " + assignedCount);
-            System.out.println("未分配的任务数: " + (totalTickets - assignedCount));
-        } else {
-            for (RepairTicket ticket : tickets) {
-                System.out.println("工单ID: " + ticket.getTicketId() +
-                                 ", 状态: " + ticket.getStatus() +
-                                 ", 维修工ID: " + (ticket.getStaff() != null ? ticket.getStaff().getUserId() : "null"));
-            }
-        }
 
         return tickets.stream()
             .sorted(Comparator.comparing(RepairTicket::getCreatedAt).reversed())
@@ -656,6 +675,287 @@ public class TicketService {
         return result;
     }
 
+    @Transactional(readOnly = true)
+    public Map<String, Object> getSlaOverview() {
+        LocalDateTime now = LocalDateTime.now();
+        List<RepairTicket> tickets = ticketRepository.findAll();
+        List<Map<String, Object>> alertTickets = new ArrayList<>();
+
+        int activeCount = 0;
+        int overdueAcceptCount = 0;
+        int overdueCompletionCount = 0;
+        int warningCount = 0;
+
+        for (RepairTicket ticket : tickets) {
+            if (Boolean.TRUE.equals(ticket.getDeleted())) {
+                continue;
+            }
+            TicketStatus status = ticket.getStatus();
+            if (status != TicketStatus.WAITING_ACCEPT && status != TicketStatus.IN_PROGRESS) {
+                continue;
+            }
+
+            activeCount++;
+            Map<String, Object> slaItem = buildSlaItem(ticket, now);
+            if (slaItem == null) {
+                continue;
+            }
+
+            String slaStatus = String.valueOf(slaItem.get("slaStatus"));
+            String slaType = String.valueOf(slaItem.get("slaType"));
+            if ("OVERDUE".equals(slaStatus) && "ACCEPTANCE".equals(slaType)) {
+                overdueAcceptCount++;
+            } else if ("OVERDUE".equals(slaStatus) && "COMPLETION".equals(slaType)) {
+                overdueCompletionCount++;
+            } else if ("WARNING".equals(slaStatus)) {
+                warningCount++;
+            }
+
+            alertTickets.add(slaItem);
+        }
+
+        alertTickets.sort((left, right) -> {
+            int leftRank = "OVERDUE".equals(left.get("slaStatus")) ? 0 : 1;
+            int rightRank = "OVERDUE".equals(right.get("slaStatus")) ? 0 : 1;
+            if (leftRank != rightRank) {
+                return Integer.compare(leftRank, rightRank);
+            }
+            LocalDateTime leftDue = (LocalDateTime) left.get("dueAt");
+            LocalDateTime rightDue = (LocalDateTime) right.get("dueAt");
+            if (leftDue == null && rightDue == null) {
+                return 0;
+            }
+            if (leftDue == null) {
+                return 1;
+            }
+            if (rightDue == null) {
+                return -1;
+            }
+            return leftDue.compareTo(rightDue);
+        });
+
+        int alertTotal = overdueAcceptCount + overdueCompletionCount + warningCount;
+        Map<String, Object> result = new HashMap<>();
+        result.put("activeCount", activeCount);
+        result.put("overdueAcceptCount", overdueAcceptCount);
+        result.put("overdueCompletionCount", overdueCompletionCount);
+        result.put("warningCount", warningCount);
+        result.put("alertTotal", alertTotal);
+        result.put("overdueRate", activeCount == 0 ? 0.0 : Math.round((overdueAcceptCount + overdueCompletionCount) * 1000.0 / activeCount) / 10.0);
+        result.put("alertTickets", alertTickets);
+        result.put("rules", buildSlaRules());
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getHotspotAnalysis() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("hotAreas", mapHotAreas(ticketRepository.findHotAreaStats()));
+        result.put("categoryGrowth", mapCategoryGrowth(ticketRepository.findCategoryGrowthStats()));
+        result.put("repeatedLocations", mapRepeatedLocations(ticketRepository.findRepeatedLocationStats()));
+        result.put("staffWorkload", mapStaffWorkload(ticketRepository.findStaffWorkloadStats()));
+        result.put("categoryProcessingTime", mapCategoryProcessingTime(ticketRepository.findCategoryProcessingTimeStats()));
+        result.put("generatedAt", LocalDateTime.now());
+        return result;
+    }
+
+    private List<Map<String, Object>> mapHotAreas(List<Object[]> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("area", row[0] != null ? row[0].toString() : "未知区域");
+            item.put("totalTickets", toInt((Number) row[1]));
+            item.put("activeTickets", toInt((Number) row[2]));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> mapCategoryGrowth(List<Object[]> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            int recent = toInt((Number) row[1]);
+            int previous = toInt((Number) row[2]);
+            Map<String, Object> item = new HashMap<>();
+            item.put("category", row[0] != null ? row[0].toString() : "未分类");
+            item.put("recentCount", recent);
+            item.put("previousCount", previous);
+            item.put("growth", recent - previous);
+            item.put("growthRate", previous == 0 ? (recent > 0 ? 100.0 : 0.0) : Math.round((recent - previous) * 1000.0 / previous) / 10.0);
+            result.add(item);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> mapRepeatedLocations(List<Object[]> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("location", row[0] != null ? row[0].toString() : "未知位置");
+            item.put("category", row[1] != null ? row[1].toString() : "未分类");
+            item.put("totalTickets", toInt((Number) row[2]));
+            item.put("activeTickets", toInt((Number) row[3]));
+            item.put("lastCreatedAt", row[4]);
+            result.add(item);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> mapStaffWorkload(List<Object[]> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("staffId", row[0] != null ? row[0].toString() : "");
+            item.put("staffName", row[1] != null ? row[1].toString() : "未知维修员");
+            item.put("totalAssigned", toInt((Number) row[2]));
+            item.put("activeTickets", toInt((Number) row[3]));
+            item.put("completedTickets", toInt((Number) row[4]));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> mapCategoryProcessingTime(List<Object[]> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            double avgHours = row[2] == null ? 0.0 : ((Number) row[2]).doubleValue();
+            Map<String, Object> item = new HashMap<>();
+            item.put("category", row[0] != null ? row[0].toString() : "未分类");
+            item.put("completedTickets", toInt((Number) row[1]));
+            item.put("avgHours", Math.round(avgHours * 10.0) / 10.0);
+            item.put("displayText", formatHoursDisplay(avgHours));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private String formatHoursDisplay(double hours) {
+        if (hours <= 0) {
+            return "暂无数据";
+        }
+        if (hours >= 24) {
+            return String.format(java.util.Locale.ROOT, "%.1f 天", hours / 24.0);
+        }
+        return String.format(java.util.Locale.ROOT, "%.1f 小时", hours);
+    }
+
+    private Map<String, Object> buildSlaItem(RepairTicket ticket, LocalDateTime now) {
+        String priority = normalizePriority(ticket.getPriority());
+        long responseHours = responseLimitHours(priority);
+        long completionHours = completionLimitHours(priority);
+
+        LocalDateTime startAt;
+        LocalDateTime dueAt;
+        String slaType;
+        String slaLabel;
+        long limitHours;
+
+        if (ticket.getStatus() == TicketStatus.WAITING_ACCEPT) {
+            startAt = ticket.getCreatedAt();
+            dueAt = startAt != null ? startAt.plusHours(responseHours) : null;
+            slaType = "ACCEPTANCE";
+            slaLabel = "受理时限";
+            limitHours = responseHours;
+        } else if (ticket.getStatus() == TicketStatus.IN_PROGRESS) {
+            startAt = ticket.getAssignedAt() != null ? ticket.getAssignedAt() : ticket.getCreatedAt();
+            dueAt = startAt != null ? startAt.plusHours(completionHours) : null;
+            slaType = "COMPLETION";
+            slaLabel = "完成时限";
+            limitHours = completionHours;
+        } else {
+            return null;
+        }
+
+        if (dueAt == null) {
+            return null;
+        }
+
+        boolean overdue = now.isAfter(dueAt);
+        long warningHours = Math.max(1, Math.round(limitHours * 0.25));
+        boolean warning = !overdue && !now.isBefore(dueAt.minusHours(warningHours));
+        if (!overdue && !warning) {
+            return null;
+        }
+
+        long remainingHours = java.time.Duration.between(now, dueAt).toHours();
+        long overdueHours = overdue ? java.time.Duration.between(dueAt, now).toHours() : 0;
+
+        Map<String, Object> item = new HashMap<>();
+        item.put("ticketId", ticket.getTicketId());
+        item.put("status", ticket.getStatus());
+        item.put("categoryName", ticket.getCategory() != null ? ticket.getCategory().getCategoryName() : null);
+        item.put("studentId", ticket.getStudent() != null ? ticket.getStudent().getUserId() : null);
+        item.put("staffId", ticket.getStaff() != null ? ticket.getStaff().getUserId() : null);
+        item.put("locationText", ticket.getLocationText());
+        item.put("description", ticket.getDescription());
+        item.put("priority", ticket.getPriority());
+        item.put("createdAt", ticket.getCreatedAt());
+        item.put("assignedAt", ticket.getAssignedAt());
+        item.put("estimatedCompletionTime", ticket.getEstimatedCompletionTime());
+        item.put("deleted", ticket.getDeleted());
+        item.put("deletedAt", ticket.getDeletedAt());
+        item.put("slaType", slaType);
+        item.put("slaStatus", overdue ? "OVERDUE" : "WARNING");
+        item.put("slaLabel", slaLabel);
+        item.put("dueAt", dueAt);
+        item.put("remainingHours", Math.max(0, remainingHours));
+        item.put("overdueHours", Math.max(0, overdueHours));
+        item.put("limitHours", limitHours);
+        return item;
+    }
+
+    private List<Map<String, Object>> buildSlaRules() {
+        List<Map<String, Object>> rules = new ArrayList<>();
+        rules.add(buildSlaRule("high", 2, 24));
+        rules.add(buildSlaRule("medium", 8, 72));
+        rules.add(buildSlaRule("low", 24, 168));
+        return rules;
+    }
+
+    private Map<String, Object> buildSlaRule(String priority, long responseHours, long completionHours) {
+        Map<String, Object> rule = new HashMap<>();
+        rule.put("priority", priority);
+        rule.put("responseHours", responseHours);
+        rule.put("completionHours", completionHours);
+        return rule;
+    }
+
+    private String normalizePriority(String priority) {
+        if (priority == null || priority.isBlank()) {
+            return "medium";
+        }
+        String normalized = priority.toLowerCase(Locale.ROOT);
+        if ("high".equals(normalized) || "medium".equals(normalized) || "low".equals(normalized)) {
+            return normalized;
+        }
+        return "medium";
+    }
+
+    private long responseLimitHours(String priority) {
+        return switch (priority) {
+            case "high" -> configLong("sla.high.responseHours", 2);
+            case "low" -> configLong("sla.low.responseHours", 24);
+            default -> configLong("sla.medium.responseHours", 8);
+        };
+    }
+
+    private long completionLimitHours(String priority) {
+        return switch (priority) {
+            case "high" -> configLong("sla.high.completionHours", 24);
+            case "low" -> configLong("sla.low.completionHours", 168);
+            default -> configLong("sla.medium.completionHours", 72);
+        };
+    }
+
+    private long configLong(String key, long fallback) {
+        try {
+            String value = systemConfigService.getValue(key, String.valueOf(fallback));
+            return Long.parseLong(value);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
     private RepairTicket findTicket(Long ticketId) {
         return ticketRepository.findById(ticketId)
             .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "报修单不存在"));
@@ -677,6 +977,115 @@ public class TicketService {
         log.setChangedBy(operator);
         log.setLogTime(LocalDateTime.now());
         statusLogRepository.save(log);
+    }
+
+    private void notifyAdminsNewTicket(RepairTicket ticket) {
+        notificationService.notifyAdmins(
+            "新报修工单待分配",
+            "工单 #" + ticket.getTicketId() + " 已提交，地点：" + safeText(ticket.getLocationText()) + "，请及时分配维修人员。",
+            ticket
+        );
+    }
+
+    private void notifyTicketAssigned(RepairTicket ticket, User staff) {
+        notificationService.notifyUser(
+            staff,
+            "你有新的维修任务",
+            "工单 #" + ticket.getTicketId() + " 已分配给你，地点：" + safeText(ticket.getLocationText()) + "。",
+            ticket
+        );
+        notificationService.notifyUser(
+            ticket.getStudent(),
+            "报修工单已受理",
+            "你的工单 #" + ticket.getTicketId() + " 已分配给维修人员：" + safeUserName(staff) + "。",
+            ticket
+        );
+    }
+
+    private void notifyStatusChanged(RepairTicket ticket, TicketStatus oldStatus, TicketStatus newStatus, User oldStaff) {
+        if (oldStatus == newStatus) {
+            return;
+        }
+        switch (newStatus) {
+            case REJECTED -> {
+                String reason = ticket.getRejectionReason() == null || ticket.getRejectionReason().isBlank()
+                    ? "未填写具体原因"
+                    : ticket.getRejectionReason();
+                notificationService.notifyUser(
+                    ticket.getStudent(),
+                    "报修工单被驳回",
+                    "你的工单 #" + ticket.getTicketId() + " 已被驳回，原因：" + reason,
+                    ticket
+                );
+                notificationService.notifyUser(
+                    oldStaff,
+                    "维修任务已驳回关闭",
+                    "工单 #" + ticket.getTicketId() + " 已驳回，不再需要继续处理。",
+                    ticket
+                );
+            }
+            case RESOLVED, WAITING_FEEDBACK -> notificationService.notifyUser(
+                ticket.getStudent(),
+                "报修工单已完成",
+                "你的工单 #" + ticket.getTicketId() + " 已处理完成，请确认并评价本次服务。",
+                ticket
+            );
+            case CLOSED -> {
+                notificationService.notifyUser(
+                    ticket.getStudent(),
+                    "报修工单已关闭",
+                    "你的工单 #" + ticket.getTicketId() + " 已关闭。",
+                    ticket
+                );
+                notificationService.notifyUser(
+                    ticket.getStaff(),
+                    "维修任务已关闭",
+                    "工单 #" + ticket.getTicketId() + " 已关闭归档。",
+                    ticket
+                );
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void notifyTicketRated(RepairTicket ticket, Integer score) {
+        notificationService.notifyUser(
+            ticket.getStaff(),
+            "学生已完成评价",
+            "工单 #" + ticket.getTicketId() + " 收到学生评价：" + score + " 星。",
+            ticket
+        );
+        notificationService.notifyAdmins(
+            "工单评价已提交",
+            "工单 #" + ticket.getTicketId() + " 已完成评价，评分：" + score + " 星。",
+            ticket
+        );
+    }
+
+    private String safeUserName(User user) {
+        if (user == null) {
+            return "未指定";
+        }
+        return user.getNickname() != null && !user.getNickname().isBlank()
+            ? user.getNickname()
+            : user.getUserId();
+    }
+
+    private String safeText(String text) {
+        return text == null || text.isBlank() ? "未填写" : text;
+    }
+
+    private int toInt(Long value) {
+        return value == null ? 0 : value.intValue();
+    }
+
+    private int toInt(Number value) {
+        return value == null ? 0 : value.intValue();
+    }
+
+    private double safeDouble(Double value, double fallback) {
+        return value == null || value.isNaN() || value.isInfinite() ? fallback : value;
     }
 
     private TicketDetailDto toDetailDto(RepairTicket ticket) {
@@ -704,6 +1113,11 @@ public class TicketService {
                 rating.getStaff() != null ? rating.getStaff().getUserId() : null,
                 rating.getStaff() != null ? rating.getStaff().getNickname() : null,
                 ticket.getTicketId(),
+                rating.getSpeedRating(),
+                rating.getQualityRating(),
+                rating.getAttitudeRating(),
+                rating.getResolved(),
+                rating.getAnonymous(),
                 rating.getRatedAt()
             ))
             .orElse(null);
@@ -755,5 +1169,14 @@ public class TicketService {
             ticket.getDeleted(),
             ticket.getDeletedAt()
         );
+    }
+
+    private String safeName(User user) {
+        if (user == null) {
+            return "未指定人员";
+        }
+        return user.getNickname() != null && !user.getNickname().isBlank()
+            ? user.getNickname()
+            : user.getUserId();
     }
 }

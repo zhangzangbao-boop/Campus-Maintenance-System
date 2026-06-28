@@ -41,6 +41,11 @@ export const feedbackService = {
         repairmanName: item.staffName ?? item.repairmanName ?? null, // 使用后端返回的维修人员姓名
         // 报修单ID
         repairOrderId: item.repairOrderId ?? null,
+        speedRating: item.speedRating ?? null,
+        qualityRating: item.qualityRating ?? null,
+        attitudeRating: item.attitudeRating ?? null,
+        resolved: item.resolved,
+        anonymous: item.anonymous,
         // 时间字段
         createdAt: item.ratedAt ?? item.createdAt ?? item.created_at,
       }));
@@ -57,11 +62,7 @@ export const feedbackService = {
   // 根据ID删除评价
   deleteFeedback: async (feedbackId) => {
     try {
-      const response = await api.admin.deleteFeedback(feedbackId);
-
-      // 后端删除接口返回 204 No Content，此时 response 可能是空对象
-      // 只要没有抛异常就认为成功
-      console.log('删除评价响应:', response);
+      await api.admin.deleteFeedback(feedbackId);
       message.success('评价删除成功');
       return true;
     } catch (error) {

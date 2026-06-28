@@ -1,76 +1,237 @@
-import React, { useState, useEffect } from "react";
-import { Layout, Menu, Avatar, Space, Dropdown, message } from "antd";
+import React, { useEffect, useMemo, useState } from "react";
+import { Button, Col, message, Row, Skeleton, Space, Typography } from "antd";
 import {
-  UserOutlined,
-  EditOutlined,
   AppstoreOutlined,
+  BarChartOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  EditOutlined,
+  FileSearchOutlined,
   PlusOutlined,
+  RobotOutlined,
+  SettingOutlined,
+  StarOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import MyRepairs from "./MyRepairs";
 import CreateRepairPage from "./CreateRepairPage";
-import PersonalInfoEd from "../Services/PersonalInfoEd";
-import { repairService } from "../Services/repairService";
+import PersonalInfoEd from "../services/PersonalInfoEd";
+import { repairService } from "../services/repairService";
+import AppShell from "../components/AppShell";
+import { MetricCard, MiniList, PageHero, QuickActionGrid, SectionCard, StatusTag } from "../components/DashboardWidgets";
 
-const { Sider, Content, Header } = Layout;
+const { Text, Title } = Typography;
+
+const emptyStats = {
+  total: 0,
+  pending: 0,
+  processing: 0,
+  toEvaluate: 0,
+  completed: 0,
+};
+
+const getStoredStudent = () => {
+  const storedUser = localStorage.getItem("user");
+  if (storedUser) {
+    const user = JSON.parse(storedUser);
+    return {
+      username: user.nickname || user.userId || "学生用户",
+      userId: user.userId,
+      email: user.email || "",
+      phone: user.contactPhone || "",
+      department: "学生",
+      position: "学生",
+      studentID: user.userId,
+      role: user.role,
+    };
+  }
+  return {
+    username: "学生用户",
+    email: "",
+    phone: "",
+    department: "学生",
+    position: "学生",
+    studentID: "",
+  };
+};
+
+const StudentDashboard = ({ orders, loading, onNavigate, onRefresh }) => {
+  const stats = useMemo(() => {
+    const source = Array.isArray(orders) ? orders : [];
+    return source.reduce((acc, order) => {
+      const status = order.status;
+      acc.total += 1;
+      if (status === "pending") acc.pending += 1;
+      if (status === "processing") acc.processing += 1;
+      if (status === "to_be_evaluated" || (status === "completed" && !order.rating)) acc.toEvaluate += 1;
+      if (status === "closed" || (status === "completed" && order.rating)) acc.completed += 1;
+      return acc;
+    }, { ...emptyStats });
+  }, [orders]);
+
+  const activeOrders = useMemo(
+    () => (orders || []).filter((item) => ["pending", "processing", "to_be_evaluated", "completed"].includes(item.status)).slice(0, 5),
+    [orders]
+  );
+
+  return (
+    <div className="dashboard-page student-dashboard">
+      <PageHero
+        eyebrow="学生服务台"
+        title="校园报修，一站式跟踪"
+        description="从智能填写、提交报修、进度跟踪到满意度评价，学生端形成完整闭环。"
+        actions={
+          <Space wrap>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate("create-repair")}>
+              立即报修
+            </Button>
+            <Button icon={<RobotOutlined />} onClick={() => onNavigate("create-repair")}>
+              AI 智能填写
+            </Button>
+            <Button icon={<FileSearchOutlined />} onClick={() => onNavigate("my-repairs")}>
+              查看进度
+            </Button>
+          </Space>
+        }
+      >
+        <div className="hero-status-card">
+          <div>当前待处理</div>
+          <strong>{stats.pending + stats.processing + stats.toEvaluate}</strong>
+          <span>条需要关注</span>
+        </div>
+      </PageHero>
+
+      <Row gutter={[16, 16]} className="metric-grid">
+        <Col xs={24} sm={12} xl={6}>
+          <MetricCard loading={loading} title="我的报修" value={stats.total} icon={<AppstoreOutlined />} description="历史提交总量" />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <MetricCard loading={loading} color="amber" title="待受理" value={stats.pending} icon={<ClockCircleOutlined />} description="等待管理员分派" />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <MetricCard loading={loading} color="cyan" title="处理中" value={stats.processing} icon={<ThunderboltOutlined />} description="维修人员正在处理" />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <MetricCard loading={loading} color="purple" title="待评价" value={stats.toEvaluate} icon={<StarOutlined />} description="完成闭环的关键一步" />
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={10}>
+          <SectionCard title="快捷入口">
+            <QuickActionGrid
+              items={[
+                {
+                  key: "create",
+                  title: "立即报修",
+                  description: "提交文字、图片和位置",
+                  icon: <PlusOutlined />,
+                  onClick: () => onNavigate("create-repair"),
+                },
+                {
+                  key: "ai",
+                  title: "AI 智能填写",
+                  description: "用一段话自动生成表单",
+                  icon: <RobotOutlined />,
+                  color: "cyan",
+                  onClick: () => onNavigate("create-repair"),
+                },
+                {
+                  key: "evaluate",
+                  title: "待评价",
+                  description: "确认服务质量并反馈",
+                  icon: <StarOutlined />,
+                  color: "purple",
+                  onClick: () => onNavigate("to-evaluate"),
+                },
+              ]}
+            />
+          </SectionCard>
+        </Col>
+        <Col xs={24} lg={14}>
+          <SectionCard
+            title="我的进度"
+            extra={<Button type="link" onClick={() => onNavigate("my-repairs")}>全部工单</Button>}
+          >
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 4 }} />
+            ) : activeOrders.length ? (
+              <MiniList
+                items={activeOrders}
+                renderItem={(item) => (
+                  <>
+                    <div className="mini-list-main">
+                      <strong>#{item.ticketId || item.id} {item.title || item.location || "报修单"}</strong>
+                      <Text type="secondary">{item.location || "未填写位置"}</Text>
+                    </div>
+                    <StatusTag status={item.status} />
+                  </>
+                )}
+              />
+            ) : (
+              <div className="empty-inline">
+                暂无进行中的报修，遇到问题可立即提交。
+              </div>
+            )}
+          </SectionCard>
+        </Col>
+      </Row>
+    </div>
+  );
+};
 
 const Home = () => {
-  const [currentMenu, setCurrentMenu] = useState("my-repairs");
-  const [collapsed, setCollapsed] = useState(false);
+  const [currentMenu, setCurrentMenu] = useState("dashboard");
   const [repairOrders, setRepairOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-
-  // 新增状态：控制个人信息编辑弹窗显示
+  const [targetOrderId, setTargetOrderId] = useState(null);
   const [personalInfoModalVisible, setPersonalInfoModalVisible] = useState(false);
+  const [currentUser, setCurrentUser] = useState(getStoredStudent);
 
-  // 新增状态：当前用户信息 - 从localStorage读取
-  const [currentUser, setCurrentUser] = useState(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      const user = JSON.parse(storedUser);
-      return {
-        username: user.nickname || user.userId || "学生用户",
-        userId: user.userId,
-        email: user.email || "",
-        phone: user.contactPhone || "",
-        department: "学生",
-        position: "学生",
-        studentID: user.userId,
-        role: user.role,
-      };
-    }
-    return {
-      username: "学生用户",
-      email: "",
-      phone: "",
-      department: "学生",
-      position: "学生",
-      studentID: "",
-    };
-  });
-
-  // 侧边栏菜单配置
   const sideMenuItems = [
     {
-      key: "my-repairs",
-      icon: <AppstoreOutlined />,
-      label: "我的报修",
+      key: "overview",
+      label: "我的服务",
+      type: "group",
+      children: [
+        { key: "dashboard", icon: <BarChartOutlined />, label: "学生总览" },
+        { key: "create-repair", icon: <PlusOutlined />, label: "立即报修" },
+      ],
     },
     {
-      key: "create-repair",
-      icon: <PlusOutlined />,
-      label: "申请报修",
+      key: "orders",
+      label: "工单跟踪",
+      type: "group",
+      children: [
+        { key: "my-repairs", icon: <FileSearchOutlined />, label: "我的进度" },
+        { key: "to-evaluate", icon: <StarOutlined />, label: "待评价" },
+        { key: "completed", icon: <CheckCircleOutlined />, label: "历史记录" },
+      ],
+    },
+    {
+      key: "account",
+      label: "个人中心",
+      type: "group",
+      children: [
+        { key: "profile", icon: <SettingOutlined />, label: "个人资料" },
+      ],
     },
   ];
 
-  // 获取我的报修记录
+  const avatarMenuItems = [
+    {
+      key: "edit-profile",
+      icon: <EditOutlined />,
+      label: "编辑个人信息",
+    },
+  ];
+
   const fetchMyRepairs = async () => {
     setLoading(true);
     try {
-      const result = await repairService.getRepairOrders();
-      // 根据当前用户ID过滤数据
-      const myOrders = result.data.filter(order => order.studentID === currentUser.studentID);
-      setRepairOrders(myOrders);
+      const result = await repairService.getMyRepairOrders();
+      setRepairOrders(result.data || []);
     } catch (error) {
       console.error("获取报修记录失败:", error);
     } finally {
@@ -82,189 +243,114 @@ const Home = () => {
     fetchMyRepairs();
   }, [refreshTrigger]);
 
-  // 处理侧边栏菜单点击
-  const handleSideMenuClick = (e) => {
-    setCurrentMenu(e.key);
+  useEffect(() => {
+    const handleOpenRelatedOrder = (event) => {
+      const orderId = event.detail?.orderId;
+      if (!orderId) return;
+      setCurrentMenu("my-repairs");
+      setTargetOrderId(orderId);
+    };
+    window.addEventListener("open-related-order", handleOpenRelatedOrder);
+    return () => window.removeEventListener("open-related-order", handleOpenRelatedOrder);
+  }, []);
+
+  const handleSideMenuClick = (event) => {
+    if (event.key === "profile") {
+      setPersonalInfoModalVisible(true);
+      return;
+    }
+    setCurrentMenu(event.key);
   };
 
-  // 处理头像下拉菜单点击
-  const handleAvatarMenuClick = (e) => {
-    if (e.key === "edit-profile") {
+  const handleAvatarMenuClick = (event) => {
+    if (event.key === "edit-profile") {
       setPersonalInfoModalVisible(true);
-    } else if (e.key === "logout") {
-      // 清除本地存储
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      // 跳转到登录页面
-      window.location.href = '/login';
     }
   };
 
-  // 处理个人信息更新
   const handleUserInfoUpdate = (updatedInfo) => {
     setCurrentUser(updatedInfo);
     message.success("个人信息更新成功！");
   };
 
-  // 刷新数据
   const handleRefresh = () => {
-    setRefreshTrigger(prev => prev + 1);
+    setRefreshTrigger((prev) => prev + 1);
   };
 
-  // 头像下拉菜单项
-  const avatarMenuItems = [
-    {
-      key: "edit-profile",
-      icon: <EditOutlined />,
-      label: "编辑个人信息",
-    },
-    {
-      type: "divider",
-    },
-    {
-      key: "logout",
-      icon: <UserOutlined />,
-      label: "退出登录",
-      danger: true,
-    },
-  ];
+  const renderContent = () => {
+    if (currentMenu === "dashboard") {
+      return (
+        <StudentDashboard
+          orders={repairOrders}
+          loading={loading}
+          onNavigate={setCurrentMenu}
+          onRefresh={handleRefresh}
+        />
+      );
+    }
+
+    if (currentMenu === "create-repair") {
+      return (
+        <CreateRepairPage
+          currentUser={currentUser}
+          onSubmitSuccess={() => {
+            setCurrentMenu("my-repairs");
+            handleRefresh();
+          }}
+        />
+      );
+    }
+
+    const initialFilters = {
+      "to-evaluate": { status: "to_be_evaluated" },
+      completed: { status: "closed" },
+    }[currentMenu];
+
+    return (
+      <div>
+        {currentMenu === "to-evaluate" && (
+          <div className="module-intro">
+            <Title level={4}>待评价工单</Title>
+          </div>
+        )}
+        {currentMenu === "completed" && (
+          <div className="module-intro">
+            <Title level={4}>历史报修记录</Title>
+          </div>
+        )}
+        <MyRepairs
+          initialFilters={initialFilters}
+          onRefresh={handleRefresh}
+          targetOrderId={targetOrderId}
+          onTargetOrderHandled={() => setTargetOrderId(null)}
+        />
+      </div>
+    );
+  };
 
   return (
-    <Layout style={{ height: "100vh", background: "#FFFFFF" }}>
-      {/* 侧边栏 */}
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        style={{
-          position: "fixed",
-          zIndex: 100,
-          height: "100vh",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          background: "#0F52BA",
-          boxShadow: "none",
-        }}
+    <>
+      <AppShell
+        role="STUDENT"
+        user={currentUser}
+        title="理工管家 - 学生服务台"
+        subtitle="立即报修、进度跟踪、评价反馈和 AI 辅助填写"
+        menuItems={sideMenuItems}
+        selectedKey={currentMenu}
+        onMenuClick={handleSideMenuClick}
+        avatarMenuItems={avatarMenuItems}
+        onAvatarMenuClick={handleAvatarMenuClick}
       >
-        <div
-          style={{
-            height: "40px",
-            margin: "16px 12px",
-            background: "rgba(255, 255, 255, 0.08)",
-            borderRadius: "6px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "white",
-            fontWeight: "600",
-            fontSize: "15px",
-          }}
-        >
-          {collapsed ? "学生" : "学生报修系统"}
-        </div>
+        {renderContent()}
+      </AppShell>
 
-        <Menu
-          selectedKeys={[currentMenu]}
-          mode="inline"
-          items={sideMenuItems}
-          onClick={handleSideMenuClick}
-          style={{
-            background: "transparent",
-            border: "none",
-          }}
-          theme="dark"
-        />
-      </Sider>
-
-      <Layout style={{ marginLeft: collapsed ? 80 : 200, transition: "margin-left 0.2s", background: "#FFFFFF" }}>
-        {/* 顶部Header */}
-        <Header
-          style={{
-            padding: "0 24px",
-            background: "#FFFFFF",
-            borderBottom: "1px solid #e8e8e8",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            position: "fixed",
-            zIndex: 99,
-            right: 0,
-            top: 0,
-            height: "56px",
-            boxShadow: "none",
-          }}
-        >
-          <div style={{ fontSize: "15px", fontWeight: "600", color: "#1f1f1f" }}>
-            智能报修平台
-          </div>
-
-          <Space size="middle">
-            <span style={{ fontSize: "15px", color: "#5c5c5c" }}>欢迎，{currentUser.username}</span>
-            <Dropdown
-              menu={{
-                items: avatarMenuItems,
-                onClick: handleAvatarMenuClick,
-              }}
-              placement="bottomRight"
-              arrow
-            >
-              <Avatar
-                size={32}
-                icon={<UserOutlined />}
-                style={{
-                  cursor: "pointer",
-                  background: "#0F52BA",
-                }}
-              />
-            </Dropdown>
-          </Space>
-        </Header>
-
-        {/* 内容区域 */}
-        <Content
-          style={{
-            margin: "76px 20px 20px 20px",
-            padding: 0,
-            background: "#FFFFFF",
-            overflow: "auto",
-          }}
-        >
-          <div style={{
-            background: "#F8FAFC",
-            borderRadius: "8px",
-            padding: "20px",
-          }}>
-            {currentMenu === "my-repairs" && (
-              <MyRepairs
-                repairOrders={repairOrders}
-                loading={loading}
-                currentUser={currentUser}
-                onRefresh={handleRefresh}
-              />
-            )}
-
-            {currentMenu === "create-repair" && (
-              <CreateRepairPage
-                currentUser={currentUser}
-                onSubmitSuccess={() => {
-                  setCurrentMenu("my-repairs");
-                  handleRefresh();
-                }}
-              />
-            )}
-          </div>
-        </Content>
-      </Layout>
-
-      {/* 个人信息编辑弹窗 */}
       <PersonalInfoEd
         visible={personalInfoModalVisible}
         onCancel={() => setPersonalInfoModalVisible(false)}
         userInfo={currentUser}
         onUpdate={handleUserInfoUpdate}
       />
-    </Layout>
+    </>
   );
 };
 

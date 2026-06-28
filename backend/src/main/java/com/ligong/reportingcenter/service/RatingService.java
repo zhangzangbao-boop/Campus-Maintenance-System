@@ -73,6 +73,11 @@ public class RatingService {
                     rating.getStaff() != null ? rating.getStaff().getUserId() : null,
                     staffName,    // 新增：维修人员姓名
                     repairOrderId, // 新增：报修单ID
+                    rating.getSpeedRating(),
+                    rating.getQualityRating(),
+                    rating.getAttitudeRating(),
+                    rating.getResolved(),
+                    rating.getAnonymous(),
                     rating.getRatedAt()
             );
 

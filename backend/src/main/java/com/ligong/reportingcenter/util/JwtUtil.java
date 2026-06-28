@@ -5,22 +5,26 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import java.security.Key;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class JwtUtil {
-    
-    // JWT密钥（实际项目中应该从配置文件读取）
-    // 使用固定的密钥以防止每次重启后令牌失效
-    private static final String SECRET = "mySecretKeyForCampusMaintenanceSystem123456";
-    private Key SECRET_KEY = Keys.hmacShaKeyFor(SECRET.getBytes());
-    
-    // Token有效期7天
-    private static final long JWT_TOKEN_VALIDITY = 7 * 24 * 60 * 60 * 1000;
+
+    private final Key secretKey;
+    private final long tokenValidityMs;
+
+    public JwtUtil(
+            @Value("${jwt.secret:mySecretKeyForCampusMaintenanceSystem123456}") String secret,
+            @Value("${jwt.expiration-ms:604800000}") long tokenValidityMs) {
+        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.tokenValidityMs = tokenValidityMs;
+    }
 
     // 从JWT中提取用户名
     public String extractUsername(String token) {
@@ -40,7 +44,7 @@ public class JwtUtil {
 
     // 解析JWT中的所有声明
     private Claims extractAllClaims(String token) {
-        return Jwts.parserBuilder().setSigningKey(SECRET_KEY).build().parseClaimsJws(token).getBody();
+        return Jwts.parserBuilder().setSigningKey(secretKey).build().parseClaimsJws(token).getBody();
     }
 
     // 检查JWT是否过期
@@ -61,8 +65,8 @@ public class JwtUtil {
                 .setClaims(claims)
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + JWT_TOKEN_VALIDITY))
-                .signWith(SECRET_KEY, SignatureAlgorithm.HS256)
+                .setExpiration(new Date(System.currentTimeMillis() + tokenValidityMs))
+                .signWith(secretKey, SignatureAlgorithm.HS256)
                 .compact();
     }
 

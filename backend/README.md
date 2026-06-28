@@ -67,6 +67,12 @@
     - comment: 评论 (TEXT)
     - created_at: 创建时间 (DATETIME, NOT NULL)
 
+#### V3 智能特色与运维表
+- **sys_audit_log**: 管理员关键操作审计日志
+- **sys_system_config**: 系统配置中心，保存 AI、SLA、上传限制和备份等配置
+- **repair_knowledge_base**: 维修知识库，保存常见问题、处理步骤、安全注意事项
+- **ai_ticket_analysis**: AI 智能报修分析缓存
+
 ### 1.2 实体关系
 - Categories (1) → Repair_Tickets (N): 一个分类可以对应多张报修单
 - Users (1) → Repair_Tickets (N): 一个用户可以提交多张报修单
@@ -105,15 +111,73 @@
 - **LocationStatsDto**: 传输地点统计信息
 - **TicketImageDto**: 传输图片信息
 - **TicketStatusLogDto**: 传输状态日志信息
+- **AiTicketAnalysisDto**: 传输智能报修识别结果、相似工单和知识库推荐
+- **SimilarTicketDto**: 传输相似历史工单
+- **KnowledgeBaseDto**: 传输维修知识库条目
+- **AuditLogDto**: 传输审计日志
+- **SystemConfigDto**: 传输系统配置
 
 ## 3. 数据库初始化
 
-数据库初始化脚本位于 `src/main/resources/schema.sql`，包含以下内容：
-1. 删除已存在的表（按依赖顺序）
-2. 创建所有表结构
-3. 插入初始数据（分类、预置用户等）
+数据库初始化脚本位于 `src/main/resources/`：
 
-## 4. 文件夹结构说明
+- `full_init_test_data.sql`: 推荐用于本地演示和功能测试，一键创建 `repairdb`、重建项目表、插入完整测试数据与各状态工单。
+- `schema.sql`: 基础建表和少量初始数据脚本。
+
+本地完整初始化：
+
+```sql
+SOURCE E:/Software_System_Design_and_Development_Practice/Campus-Maintenance-System/backend/src/main/resources/full_init_test_data.sql;
+```
+
+`full_init_test_data.sql` 会清空并重建项目相关表，重复执行前请确认不需要保留现有数据。
+
+预置测试账号密码统一为 `123456`：
+
+- 管理员：`admin`、`admin02`
+- 维修员：`worker001`、`worker002`、`worker003`、`worker004`
+- 学生：`20260001`、`20260002`、`20260003`、`20260004`、`20260005`、`20260006`、`20260007`、`20260008`
+
+## 4. 智能特色接口
+
+- `POST /api/ai/ticket/analyze`: 智能识别报修描述，返回标题、分类、位置、优先级、安全提醒、相似工单和知识库建议。
+- `POST /api/ai/ticket/similar`: 根据描述、位置、分类检索相似历史工单。
+- `GET /api/ai/ticket/{ticketId}/summary`: 生成管理员/维修人员可读的工单摘要。
+- `POST /api/ai/repair-report/generate`: 辅助维修人员生成标准维修报告。
+- `POST /api/ai/knowledge/draft`: 管理员输入分类和故障现象后生成维修知识库草稿。
+- `GET /api/admin/stats/facility-health`: 校园设施健康指数。
+- `GET /api/admin/knowledge-base`: 管理员查询维修知识库。
+- `GET /api/admin/system-config`: 管理员查询系统配置。
+- `GET /api/admin/audit-logs`: 管理员查询操作审计日志。
+- `GET /api/admin/transfer-requests`: 管理员查询维修转派申请。
+- `PUT /api/admin/transfer-requests/{recordId}/decision`: 管理员审批转派申请。
+- `PUT /api/tasks/{id}/arrive`: 维修人员到场确认。
+- `POST /api/tasks/{id}/process-records`: 维修人员新增过程记录。
+- `POST /api/tasks/{id}/transfer-request`: 维修人员提交转派申请。
+- `PUT /api/users/me/password`: 当前登录用户修改密码。
+
+未配置外部大模型时，后端默认使用本地规则引擎和关键词相似度，保证本地演示不依赖网络。
+
+系统配置中心支持维护 `ai.enabled`、`ai.api-key`、`ai.model`、SLA 时限、图片上传数量和单张大小限制。`upload.max-image-count` 与 `upload.max-image-size-mb` 会被后端上传服务实时读取，默认分别为 5 张和 5MB。备份恢复前会自动创建保护备份；定时备份默认关闭，可通过 `backup.auto-enabled=true` 和 `backup.cron` 开启。
+
+DeepSeek 启用方式：
+
+```yaml
+ai:
+  enabled: true
+  provider: deepseek
+  base-url: https://api.deepseek.com
+  api-key: ${DEEPSEEK_API_KEY:}
+  model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForCampusMaintenanceSystem123456}
+  expiration-ms: ${JWT_EXPIRATION_MS:604800000}
+```
+
+启动后可在管理员端 `智能运维中心 -> DeepSeek AI 服务` 查看 AI 启用状态，并在 `维修知识库` 中使用 AI 生成知识条目草稿。
+
+## 5. 文件夹结构说明
 
 ### src/main/java/com/ligong/reportingcenter/domain/entity/
 - **作用**: 存放JPA实体类，与数据库表一一对应
@@ -165,7 +229,7 @@
     - **static/**: 静态资源
     - **templates/**: 模板文件
 
-## 5. 开发规范
+## 6. 开发规范
 
 ### 5.1 命名规范
 - **包名**: 使用小写字母，用点分隔
